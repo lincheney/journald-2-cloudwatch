@@ -1,6 +1,10 @@
-FROM dock0/arch
+FROM base/archlinux
 
-RUN pacman -Syu --noconfirm --needed python-pip python-systemd && \
+# update keys
+RUN pacman --noconfirm -Sy archlinux-keyring
+
+# install deps
+RUN pacman -Sy --noconfirm openssl python-pip python-systemd && \
     pip install boto3 && \
     pacman -Rs --noconfirm python-pip && \
     pacman -Scc --noconfirm
