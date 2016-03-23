@@ -101,6 +101,7 @@ class CloudWatchClient:
                     raise
             else:
                 break
+            time.sleep(1)
         # save last cursor
         self.save_cursor(messages[-1]['__CURSOR'])
 
