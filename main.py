@@ -66,7 +66,7 @@ class CloudWatchClient:
             return msg['SYSLOG_IDENTIFIER']
 
         # otherwise, log by executable
-        return msg.get('_EXE', 'other')
+        return msg.get('_EXE', '[other]')
 
     def make_message(self, message):
         ''' prepare a message to send to cloudwatch '''
