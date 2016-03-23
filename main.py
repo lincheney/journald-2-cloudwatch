@@ -141,13 +141,19 @@ if __name__ == '__main__':
                         help='Store/read the journald cursor in this file')
     parser.add_argument('--logs', default='/var/log/journal',
                         help='Directory to journald logs (default: %(default)s)')
-    parser.add_argument('--prefix', default='',
-                        help='Log group prefix (default is blank)')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--prefix', default='',
+                       help='Log group prefix (default is blank). Log group will be {prefix}_{instance_id}')
+    group.add_argument('--log-group',
+                       help='Name of the log group to use')
     args = parser.parse_args()
 
-    log_group = get_instance_id()
-    if args.prefix:
-        log_group = '{}_{}'.format(args.prefix, log_group)
+    if args.log_group:
+        log_group = args.log_group
+    else:
+        log_group = get_instance_id()
+        if args.prefix:
+            log_group = '{}_{}'.format(args.prefix, log_group)
 
     client = CloudWatchClient(log_group, args.cursor)
     cursor = client.load_cursor()
