@@ -7,8 +7,6 @@ This is heavily based on https://github.com/arkenio/journald-wrapper.
 
 ## Running in Docker
 
-A Docker image is available at https://hub.docker.com/r/lincheney/journald-2-cloudwatch.
-
 ```bash
 docker run -e AWS_DEFAULT_REGION=ap-southeast-2 -v /var/log/journal/:/var/log/journal/:ro -v /data/journald:/:rw lincheney/journald-2-cloudwatch --cursor=/data/journald/cursor
 ```
