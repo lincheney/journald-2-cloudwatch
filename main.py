@@ -88,7 +88,7 @@ class CloudWatchClient:
             logGroupName=log_group,
             logStreamName=log_stream,
             logEvents=log_events,
-            **kwargs,
+            **kwargs
         )
 
     def log_messages(self, log_stream, messages):

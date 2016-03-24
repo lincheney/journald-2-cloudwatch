@@ -1,13 +1,12 @@
-FROM base/archlinux
+FROM debian:jessie
 
-# update keys
-RUN pacman --noconfirm -Sy archlinux-keyring
+RUN apt-get update && \
+    apt-get install -y python3 python3-systemd && \
+    rm -rf /var/lib/apt/lists/*
 
-# install deps
-RUN pacman -Sy --noconfirm openssl python-pip python-systemd && \
-    pip install boto3 && \
-    pacman -Rs --noconfirm python-pip && \
-    pacman -Scc --noconfirm
+ADD "https://bootstrap.pypa.io/get-pip.py" /get-pip.py
+RUN python3 /get-pip.py && \
+    pip3 install boto3
 
 COPY main.py /main.py
-ENTRYPOINT ["python", "/main.py"]
+ENTRYPOINT ["python3", "/main.py"]

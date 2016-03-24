@@ -11,7 +11,7 @@ This is heavily based on https://github.com/arkenio/journald-wrapper.
 docker run -e AWS_DEFAULT_REGION=ap-southeast-2 -v /var/log/journal/:/var/log/journal/:ro -v /data/journald:/:rw journald-2-cloudwatch --cursor=/data/journald/cursor
 ```
 
-The image is based on https://hub.docker.com/r/base/archlinux/.
+The image is based on `debian:jessie`.
 
 ## CloudWatch log format
 
