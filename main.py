@@ -157,9 +157,9 @@ if __name__ == '__main__':
             log_group = '{}_{}'.format(args.prefix, log_group)
 
     client = CloudWatchClient(log_group, args.cursor)
-    cursor = client.load_cursor()
 
     while True:
+        cursor = client.load_cursor()
         with systemd.journal.Reader(path=args.logs) as reader:
             if cursor:
                 reader.seek_cursor(cursor)
