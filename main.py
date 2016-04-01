@@ -94,10 +94,13 @@ class CloudWatchClient:
     def log_messages(self, log_stream, messages, chunk=10):
         ''' send messages in chunks (of 10) to avoid upload limits '''
         for i in range(0, len(messages), chunk):
-            self._log_messages(messages[i : (i+chunk)])
+            self._log_messages(log_stream, messages[i : (i+chunk)])
 
     def _log_messages(self, log_stream, messages):
         ''' log the messages, then save the cursor '''
+        if not messages:
+            return
+
         while True:
             try:
                 self.put_log_messages(log_stream, messages)
