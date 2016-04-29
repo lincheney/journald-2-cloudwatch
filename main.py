@@ -100,8 +100,9 @@ class CloudWatchClient:
         while messages:
             group = messages
             start_date = group[0]['__REALTIME_TIMESTAMP']
-            group = [m for m in group if m['__REALTIME_TIMESTAMP'] - start_date < timespan]
-            group = group[:maxlen]
+            group = itertools.takewhile(lambda m: m['__REALTIME_TIMESTAMP'] - start_date < timespan, group)
+            group = itertools.islice(group, maxlen)
+            group = list(group)
             yield group
             messages = messages[len(group):]
 
