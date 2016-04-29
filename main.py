@@ -91,10 +91,23 @@ class CloudWatchClient:
             **kwargs
         )
 
-    def log_messages(self, log_stream, messages, chunk=10):
-        ''' send messages in chunks (of 10) to avoid upload limits '''
-        for i in range(0, len(messages), chunk):
-            self._log_messages(log_stream, messages[i : (i+chunk)])
+    def group_messages(self, messages, maxlen=10, timespan=datetime.timedelta(hours=23)):
+        '''
+        group messages:
+            - in 23 hour segments (cloudwatch rejects logs spanning > 24 hours)
+            - in groups of 10 to avoid upload limits
+        '''
+        while messages:
+            group = messages
+            start_date = group[0]['__REALTIME_TIMESTAMP']
+            group = [m for m in group if m['__REALTIME_TIMESTAMP'] - start_date < timespan]
+            group = group[:maxlen]
+            yield group
+            messages = messages[len(group):]
+
+    def log_messages(self, log_stream, messages):
+        for chunk in self.group_messages(messages):
+            self._log_messages(log_stream, chunk)
 
     def _log_messages(self, log_stream, messages):
         ''' log the messages, then save the cursor '''
