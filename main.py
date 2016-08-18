@@ -1,3 +1,4 @@
+import re
 import urllib.request
 import json
 import uuid
@@ -21,6 +22,9 @@ class JournalMsgEncoder(json.JSONEncoder):
         if isinstance(obj, uuid.UUID):
             return str(obj)
         return super().default(obj)
+
+seq_token_finder = re.compile('\d{16,}').search
+
 
 class CloudWatchClient:
     ALREADY_EXISTS = 'ResourceAlreadyExistsException'
@@ -88,12 +92,30 @@ class CloudWatchClient:
         kwargs = (dict(sequenceToken=seq_token) if seq_token else {})
         log_events = list(map(self.make_message, messages))
 
-        response = self.client.put_log_events(
-            logGroupName=log_group,
-            logStreamName=log_stream,
-            logEvents=log_events,
-            **kwargs
-        )
+        MAX_RETRY = 5
+        counter = 0
+        while True:
+            try:
+                response = self.client.put_log_events(
+                    logGroupName=log_group,
+                    logStreamName=log_stream,
+                    logEvents=log_events,
+                    **kwargs
+                )
+            except botocore.exceptions.ClientError as err:
+                if err.response['Error']['Code'] == 'InvalidSequenceTokenException':
+                    # the error message is giving us the expected token
+                    seq_token = seq_token_finder(err.response['Error']['Message']).group(0)
+                    kwargs['sequenceToken'] = seq_token
+                    counter += 1
+                    if counter > MAX_RETRY:
+                        sleep(.1)
+                        seq_token = self.get_seq_token(log_stream)
+                        counter = 0
+                else:
+                    raise err
+            else:
+                break
         self.seq_tokens[log_stream] = response['nextSequenceToken']
 
     def group_messages(self, messages, maxlen=10, timespan=datetime.timedelta(hours=23)):
