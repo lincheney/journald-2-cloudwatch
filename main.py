@@ -5,10 +5,39 @@ import datetime
 import time
 import itertools
 from functools import lru_cache
+import re
+import string
 
 import systemd.journal
 import boto3
 import botocore
+
+class Formatter(string.Formatter):
+    '''
+    custom string formatter
+    if the key is of the format a|b|c , it will try to use a, b or c in that order
+    strings can also be used with '", but they should not contain |
+
+    >>> Format = Formatter().format
+    >>> Format('{a|b|c}', b=5)
+    '5'
+    >>> Format('{a|b|c}', d=5)
+    Traceback (most recent call last):
+    KeyError: 'a|b|c'
+    >>> Format('{a|"ASD"}')
+    'ASD'
+    '''
+
+    def get_value(self, key, args, kwargs):
+        if isinstance(key, str):
+            for i in key.split('|'):
+                # test for string literal
+                if len(i) > 1 and (i[0] == '"' or i[0] == '"') and i[0] == i[-1]:
+                    return i[1:-1]
+                if i in kwargs:
+                    return kwargs[i]
+        return super().get_value(key, args, kwargs)
+Format = Formatter().format
 
 @lru_cache(1)
 def get_instance_id():
@@ -33,13 +62,15 @@ class CloudWatchClient:
         self.log_groups = {}
 
     def group_messages(self, msg):
+        ''' returns the group and stream names for this msg '''
         msg = self.normalise_message(msg)
-        group = self.log_group_format.format(msg)
+        group = Format(self.log_group_format, **msg)
         group = self.log_group_client(group)
-        stream = self.log_stream_format(msg)
+        stream = Format(self.log_stream_format, **msg)
         return (group, stream)
 
     def log_group_client(self, name):
+        ''' get or create a log group client '''
         try:
             return self.log_groups[name]
         except KeyError:
@@ -54,6 +85,7 @@ class CloudWatchClient:
         return unit
 
     def normalise_message(self, msg):
+        ''' add $fields to msg that can be used with the format strings '''
         msg = msg.copy()
 
         if 'USER_UNIT' in msg:
@@ -65,8 +97,6 @@ class CloudWatchClient:
             msg['$DOCKER_CONTAINER'] = msg['CONTAINER_NAME']
 
         msg['$INSTANCE_ID'] = get_instance_id()
-
-        msg['$DEFAULT'] = '[other]'
 
         return msg
 
@@ -121,7 +151,7 @@ class LogGroupClient:
     def create_log_group(self):
         ''' create a log group, ignoring if it exists '''
         try:
-            self.client.create_log_group(logGroupName=self.log_group)
+            self.parent.client.create_log_group(logGroupName=self.log_group)
         except botocore.exceptions.ClientError as e:
             if e.response['Error']['Code'] != self.ALREADY_EXISTS:
                 raise
@@ -160,7 +190,7 @@ class LogGroupClient:
 
         while True:
             try:
-                seq_token = self.get_seq_token()
+                seq_token = self.get_seq_token(log_stream)
                 self.parent.put_log_messages(self.log_group, log_stream, seq_token, messages)
             except botocore.exceptions.ClientError as e:
                 if e.response['Error']['Code'] != self.THROTTLED:
@@ -174,7 +204,7 @@ class LogGroupClient:
     def get_seq_token(self, log_stream):
         ''' get the sequence token for the stream '''
 
-        streams = self.client.describe_log_streams(logGroupName=self.log_group, logStreamNamePrefix=log_stream, limit=1)
+        streams = self.parent.client.describe_log_streams(logGroupName=self.log_group, logStreamNamePrefix=log_stream, limit=1)
         if streams['logStreams']:
             stream = streams['logStreams'][0]
             if stream['logStreamName'] == log_stream:
@@ -186,12 +216,14 @@ class LogGroupClient:
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cursor', required=True,
+    parser.add_argument('-c', '--cursor', required=True,
                         help='Store/read the journald cursor in this file')
     parser.add_argument('--logs', default='/var/log/journal',
                         help='Directory to journald logs (default: %(default)s)')
-    group.add_argument('--log-group-format')
-    group.add_argument('--log-stream-format')
+    parser.add_argument('-g', '--log-group-format', required=True,
+                       help='Python format string for log group names')
+    parser.add_argument('-s', '--log-stream-format', required=True,
+                       help='Python format string for log stream names')
     args = parser.parse_args()
 
     client = CloudWatchClient(args.cursor, args.log_group_format, args.log_stream_format)
