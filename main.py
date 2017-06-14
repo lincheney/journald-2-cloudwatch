@@ -23,30 +23,27 @@ class JournalMsgEncoder(json.JSONEncoder):
         return super().default(obj)
 
 class CloudWatchClient:
-    ALREADY_EXISTS = 'ResourceAlreadyExistsException'
-    THROTTLED = 'ThrottlingException'
-
-    def __init__(self, log_group, cursor_path):
-        self.log_group = log_group
+    def __init__(self, cursor_path):
         self.client = boto3.client('logs')
         self.cursor_path = cursor_path
-        self.create_log_group()
+        self.log_groups = {}
 
-    def create_log_group(self):
-        ''' create a log group, ignoring if it exists '''
-        try:
-            self.client.create_log_group(logGroupName=self.log_group)
-        except botocore.exceptions.ClientError as e:
-            if e.response['Error']['Code'] != self.ALREADY_EXISTS:
-                raise
+    def group_messages(self, msg):
+        group = self.log_group_for(msg)
+        group = self.log_group_client(group)
+        stream = self.log_stream_for(msg)
+        return (group, stream)
 
-    def create_log_stream(self, log_stream):
-        ''' create a log stream, ignoring if it exists '''
+    def log_group_for(self, msg):
+        return 'TODO: log group'
+
+    def log_group_client(self, name):
         try:
-            self.client.create_log_stream(logGroupName=self.log_group, logStreamName=log_stream)
-        except botocore.exceptions.ClientError as e:
-            if e.response['Error']['Code'] != self.ALREADY_EXISTS:
-                raise
+            return self.log_groups[name]
+        except KeyError:
+            pass
+        client = self.log_groups[name] = LogGroupClient(name, self)
+        return client
 
     def log_stream_for(self, msg):
         # docker container
@@ -68,6 +65,18 @@ class CloudWatchClient:
         # otherwise, log by executable
         return msg.get('_EXE', '[other]')
 
+    def put_log_messages(self, log_group, log_stream, seq_token, messages):
+        ''' log the message to cloudwatch '''
+        kwargs = (dict(sequenceToken=seq_token) if seq_token else {})
+        log_events = list(map(self.make_message, messages))
+
+        return self.client.put_log_events(
+            logGroupName=log_group,
+            logStreamName=log_stream,
+            logEvents=log_events,
+            **kwargs
+        )
+
     def make_message(self, message):
         ''' prepare a message to send to cloudwatch '''
         timestamp = int(message['__REALTIME_TIMESTAMP'].timestamp() * 1000)
@@ -77,19 +86,48 @@ class CloudWatchClient:
         message = json.dumps(message, cls=JournalMsgEncoder)
         return dict(timestamp=timestamp, message=message)
 
-    def put_log_messages(self, log_stream, messages):
-        ''' log the message to cloudwatch '''
-        seq_token = self.get_seq_token(log_stream)
+    @staticmethod
+    def retain_message(message, retention=datetime.timedelta(days=14)):
+        ''' cloudwatch ignores messages older than 14 days '''
+        return (datetime.datetime.now() - message['__REALTIME_TIMESTAMP']) < retention
 
-        kwargs = (dict(sequenceToken=seq_token) if seq_token else {})
-        log_events = list(map(self.make_message, messages))
+    def save_cursor(self, cursor):
+        ''' saves the journal cursor to file '''
+        with open(self.cursor_path, 'w') as f:
+            f.write(cursor)
 
-        self.client.put_log_events(
-            logGroupName=log_group,
-            logStreamName=log_stream,
-            logEvents=log_events,
-            **kwargs
-        )
+    def load_cursor(self):
+        ''' loads the journal cursor from file, returns None if file not found '''
+        try:
+            with open(self.cursor_path, 'r') as f:
+                return f.read().strip()
+        except FileNotFoundError:
+            return
+
+class LogGroupClient:
+    ALREADY_EXISTS = 'ResourceAlreadyExistsException'
+    THROTTLED = 'ThrottlingException'
+
+    def __init__(self, log_group, parent):
+        self.log_group = log_group
+        self.parent = parent
+        self.create_log_group()
+
+    def create_log_group(self):
+        ''' create a log group, ignoring if it exists '''
+        try:
+            self.client.create_log_group(logGroupName=self.log_group)
+        except botocore.exceptions.ClientError as e:
+            if e.response['Error']['Code'] != self.ALREADY_EXISTS:
+                raise
+
+    def create_log_stream(self, log_stream):
+        ''' create a log stream, ignoring if it exists '''
+        try:
+            self.parent.client.create_log_stream(logGroupName=self.log_group, logStreamName=log_stream)
+        except botocore.exceptions.ClientError as e:
+            if e.response['Error']['Code'] != self.ALREADY_EXISTS:
+                raise
 
     def group_messages(self, messages, maxlen=10, timespan=datetime.timedelta(hours=23)):
         '''
@@ -117,7 +155,8 @@ class CloudWatchClient:
 
         while True:
             try:
-                self.put_log_messages(log_stream, messages)
+                seq_token = self.get_seq_token()
+                self.parent.put_log_messages(self.log_group, log_stream, seq_token, messages)
             except botocore.exceptions.ClientError as e:
                 if e.response['Error']['Code'] != self.THROTTLED:
                     raise
@@ -125,7 +164,7 @@ class CloudWatchClient:
                 break
             time.sleep(1)
         # save last cursor
-        self.save_cursor(messages[-1]['__CURSOR'])
+        self.parent.save_cursor(messages[-1]['__CURSOR'])
 
     def get_seq_token(self, log_stream):
         ''' get the sequence token for the stream '''
@@ -138,24 +177,6 @@ class CloudWatchClient:
                 return stream.get('uploadSequenceToken')
         # no stream, create it
         self.create_log_stream(log_stream)
-
-    @staticmethod
-    def retain_message(message, retention=datetime.timedelta(days=14)):
-        ''' cloudwatch ignores messages older than 14 days '''
-        return (datetime.datetime.now() - message['__REALTIME_TIMESTAMP']) < retention
-
-    def save_cursor(self, cursor):
-        ''' saves the journal cursor to file '''
-        with open(self.cursor_path, 'w') as f:
-            f.write(cursor)
-
-    def load_cursor(self):
-        ''' loads the journal cursor from file, returns None if file not found '''
-        try:
-            with open(self.cursor_path, 'r') as f:
-                return f.read().strip()
-        except FileNotFoundError:
-            return
 
 if __name__ == '__main__':
     import argparse
@@ -178,7 +199,7 @@ if __name__ == '__main__':
         if args.prefix:
             log_group = '{}_{}'.format(args.prefix, log_group)
 
-    client = CloudWatchClient(log_group, args.cursor)
+    client = CloudWatchClient(args.cursor)
 
     while True:
         cursor = client.load_cursor()
@@ -191,5 +212,5 @@ if __name__ == '__main__':
                 reader.seek_head()
 
             reader = filter(CloudWatchClient.retain_message, reader)
-            for log_stream, messages in itertools.groupby(reader, key=client.log_stream_for):
-                client.log_messages(log_stream, list(messages))
+            for (group, stream), messages in itertools.groupby(reader, key=client.group_messages):
+                group.log_messages(stream, list(messages))
