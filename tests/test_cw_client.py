@@ -1,10 +1,11 @@
 from unittest import TestCase
-from unittest.mock import patch, sentinel, call
+from unittest.mock import patch, sentinel, call, create_autospec
 import tempfile
 import os
 import uuid
 import json
 from datetime import datetime, timedelta
+from moto import mock_cloudwatch
 
 from main import get_region, CloudWatchClient, JournalMsgEncoder, LogGroupClient, Format
 
@@ -26,52 +27,60 @@ class RegionTest(TestCase):
             with patch('main.get_instance_identity_document', return_value=dict(region=region), autospec=True):
                 self.assertEqual(get_region(), region)
 
-@patch('boto3.client', autospec=True)
+@mock_cloudwatch
 class CloudWatchClientTest(TestCase):
-    def client(self, cursor='/dev/null', group_format='group', stream_format='stream'):
+    CURSOR = '/cursor'
+    GROUP = 'log group'
+    STREAM = 'log stream '
+    REGION = 'us-east-1'
+
+    def make_client(self, cursor='/dev/null', group_format='group', stream_format='stream'):
         return CloudWatchClient(cursor, group_format, stream_format)
 
-    REGION = 'us-east-1'
     def setUp(self):
+        super().setUp()
         os.environ['AWS_DEFAULT_REGION'] = self.REGION
+        self.client = self.make_client(self.CURSOR, self.GROUP, self.STREAM)
+        self.cwl = self.client.client = create_autospec(self.client.client)
 
-    def test_init(self, boto3):
+    def test_init(self):
         ''' test client init '''
 
-        client = self.client(sentinel.cursor, sentinel.group, sentinel.stream)
-        self.assertIs(client.cursor_path, sentinel.cursor)
-        self.assertIs(client.log_group_format, sentinel.group)
-        self.assertIs(client.log_stream_format, sentinel.stream)
-        # sets up the cwlogs client
-        self.assertEqual(client.client, boto3.return_value)
-        boto3.assert_called_once_with('logs', region_name=self.REGION)
+        with patch('boto3.client', autospec=True) as boto3:
+            client = self.make_client(sentinel.cursor, sentinel.group, sentinel.stream)
+            self.assertIs(client.cursor_path, sentinel.cursor)
+            self.assertIs(client.log_group_format, sentinel.group)
+            self.assertIs(client.log_stream_format, sentinel.stream)
+            # sets up the cwlogs client
+            self.assertEqual(client.client, boto3.return_value)
+            boto3.assert_called_once_with('logs', region_name=self.REGION)
 
-    def test_save_cursor(self, boto3):
+    def test_save_cursor(self):
         ''' test the cursor is saved to the file '''
 
         cursor = 'blargh'
         with tempfile.NamedTemporaryFile('r') as file:
-            client = self.client(file.name)
+            client = self.make_client(file.name)
             client.save_cursor(cursor)
             self.assertEqual(file.read(), cursor)
 
-    def test_load_cursor(self, boto3):
+    def test_load_cursor(self):
         ''' test the cursor is loaded from the file '''
 
         cursor = 'blarg'
         with tempfile.NamedTemporaryFile('w') as file:
-            client = self.client(file.name)
+            client = self.make_client(file.name)
             file.write(cursor)
             file.flush()
             self.assertEqual(client.load_cursor(), cursor)
 
-    def test_load_no_cursor(self, boto3):
+    def test_load_no_cursor(self):
         ''' test load cursor for non existent file '''
 
-        client = self.client('/non/existent/file')
+        client = self.make_client('/non/existent/file')
         self.assertIsNone(client.load_cursor())
 
-    def test_retain_message(self, boto3):
+    def test_retain_message(self):
         ''' test retain_message() '''
 
         # keep messages newer than 14 days
@@ -79,13 +88,12 @@ class CloudWatchClientTest(TestCase):
         # drop messages older than 14 days
         self.assertFalse(CloudWatchClient.retain_message(dict(__REALTIME_TIMESTAMP=datetime.now() - timedelta(days=14))))
 
-    def test_make_message(self, boto3):
+    def test_make_message(self):
         ''' test make_message() serialises the data '''
 
         ts = 123456789
         msg = [('__REALTIME_TIMESTAMP', datetime.fromtimestamp(ts)), ('a', 'abc'), ('b', 123), ('c', datetime.now()), ('d', uuid.uuid4()), ('e', object()), ]
-        client = self.client()
-        result = client.make_message(dict(msg))
+        result = CloudWatchClient.make_message(dict(msg))
 
         # dict with 2 keys
         self.assertIsInstance(result, dict)
@@ -95,59 +103,57 @@ class CloudWatchClientTest(TestCase):
         # only first 5 fields are serialisable
         self.assertEqual(json.loads(result['message']), json.loads(json.dumps(dict(msg[:5]), cls=JournalMsgEncoder)))
 
-    def test_log_group_client(self, boto3):
+    def test_log_group_client(self):
         ''' test log group client creation '''
 
-        client = self.client()
-        group = client.log_group_client('group-name')
+        group = self.client.log_group_client('group-name')
         self.assertIsInstance(group, LogGroupClient)
-        self.assertIs(group.parent, client)
+        self.assertIs(group.parent, self.client)
         self.assertEqual(group.log_group, 'group-name')
 
-    def test_group_messages(self, boto3):
+    def test_group_messages(self):
         ''' test making group and stream names from msg '''
 
-        client = self.client(group_format='{group}', stream_format='{stream}')
-        msg = dict(group='abc', stream='xyz')
-
-        with patch('main.Format', wraps=Format) as formatter:
-            group, stream = client.group_messages(msg)
-            formatter.assert_has_calls([
-                call(client.log_group_format, **msg),
-                call(client.log_stream_format, **msg),
-            ])
+        msg = {}
+        names = [self.GROUP, self.STREAM]
+        with patch('main.Format', side_effect=names) as formatter:
+            group, stream = self.client.group_messages(msg)
 
         self.assertIsInstance(group, LogGroupClient)
-        self.assertEqual(group.log_group, msg['group'])
-        self.assertEqual(stream, msg['stream'])
+        self.assertEqual(group.log_group, self.GROUP)
+        self.assertEqual(stream, self.STREAM)
 
-    def test_put_log_messages(self, boto3):
+    def test_put_log_messages(self):
         ''' test put_log_messages() '''
-        client = self.client()
-        messages = [dict(a='abc'), dict(b='xyz')]
 
+        messages = [dict(a='abc'), dict(b='xyz', __CURSOR=sentinel.cursor)]
         events = [sentinel.msg1, sentinel.msg2]
-        with patch.object(client, 'make_message', side_effect=events) as make_message:
-            client.put_log_messages(sentinel.group, sentinel.stream, sentinel.token, messages)
+        with patch.object(self.client, 'make_message', side_effect=events, autospec=True) as make_message:
+            with patch.object(self.client, 'save_cursor', autospec=True) as save_cursor:
+                self.client.put_log_messages(sentinel.group, sentinel.stream, sentinel.token, messages)
 
-        client.client.put_log_events.assert_called_once_with(
+        self.cwl.put_log_events.assert_called_once_with(
             logGroupName=sentinel.group,
             logStreamName=sentinel.stream,
             logEvents=events,
             sequenceToken=sentinel.token,
         )
+        # saves the cursor once finished
+        save_cursor.assert_called_once_with(sentinel.cursor)
 
-    def test_put_log_messages_no_token(self, boto3):
+    def test_put_log_messages_no_token(self):
         ''' test put_log_messages() when no sequence token given '''
-        client = self.client()
-        messages = [dict(a='abc'), dict(b='xyz')]
 
+        messages = [dict(a='abc'), dict(b='xyz', __CURSOR=sentinel.cursor)]
         events = [sentinel.msg1, sentinel.msg2]
-        with patch.object(client, 'make_message', side_effect=events) as make_message:
-            client.put_log_messages(sentinel.group, sentinel.stream, None, messages)
+        with patch.object(self.client, 'make_message', side_effect=events, autospec=True) as make_message:
+            with patch.object(self.client, 'save_cursor', autospec=True) as save_cursor:
+                self.client.put_log_messages(sentinel.group, sentinel.stream, None, messages)
 
-        client.client.put_log_events.assert_called_once_with(
+        self.cwl.put_log_events.assert_called_once_with(
             logGroupName=sentinel.group,
             logStreamName=sentinel.stream,
             logEvents=events,
         )
+        # saves the cursor once finished
+        save_cursor.assert_called_once_with(sentinel.cursor)

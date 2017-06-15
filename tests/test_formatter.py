@@ -3,8 +3,27 @@ from unittest.mock import patch, mock_open, Mock
 import json
 import urllib.request
 
-from .identity_doc import IDENTITY_DOC, IDENTITY_DOC_STR
 from main import Format, IDENTITY_DOC_URL, get_instance_identity_document
+
+IDENTITY_DOC_STR = b'''{
+  "devpayProductCodes" : null,
+  "availabilityZone" : "us-east-1d",
+  "privateIp" : "10.158.112.84",
+  "version" : "2010-08-31",
+  "region" : "us-east-1",
+  "instanceId" : "i-1234567890abcdef0",
+  "billingProducts" : null,
+  "instanceType" : "t1.micro",
+  "accountId" : "123456789012",
+  "pendingTime" : "2015-11-19T16:32:11Z",
+  "imageId" : "ami-5fb8c835",
+  "kernelId" : "aki-919dcaf8",
+  "ramdiskId" : null,
+  "architecture" : "x86_64"
+}
+'''
+
+IDENTITY_DOC = json.loads(IDENTITY_DOC_STR)
 
 @patch('main.get_instance_identity_document', return_value=IDENTITY_DOC, autospec=True)
 class FormatterTest(TestCase):

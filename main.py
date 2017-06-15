@@ -115,18 +115,22 @@ class CloudWatchClient:
         return client
 
     def put_log_messages(self, log_group, log_stream, seq_token, messages):
-        ''' log the message to cloudwatch '''
+        ''' log the message to cloudwatch, then save the cursor '''
         kwargs = (dict(sequenceToken=seq_token) if seq_token else {})
         log_events = list(map(self.make_message, messages))
 
-        return self.client.put_log_events(
+        result = self.client.put_log_events(
             logGroupName=log_group,
             logStreamName=log_stream,
             logEvents=log_events,
             **kwargs
         )
+        # save last cursor
+        self.save_cursor(messages[-1]['__CURSOR'])
+        return result
 
-    def make_message(self, message):
+    @staticmethod
+    def make_message(message):
         ''' prepare a message to send to cloudwatch '''
         timestamp = int(message['__REALTIME_TIMESTAMP'].timestamp() * 1000)
         # remove unserialisable values
@@ -178,7 +182,8 @@ class LogGroupClient:
             if e.response['Error']['Code'] != self.ALREADY_EXISTS:
                 raise
 
-    def group_messages(self, messages, maxlen=10, timespan=datetime.timedelta(hours=23)):
+    @staticmethod
+    def group_messages(messages, maxlen=10, timespan=datetime.timedelta(hours=23)):
         '''
         group messages:
             - in 23 hour segments (cloudwatch rejects logs spanning > 24 hours)
@@ -198,7 +203,7 @@ class LogGroupClient:
             self._log_messages(log_stream, chunk)
 
     def _log_messages(self, log_stream, messages):
-        ''' log the messages, then save the cursor '''
+        ''' log the messages '''
         if not messages:
             return
 
@@ -212,8 +217,6 @@ class LogGroupClient:
             else:
                 break
             time.sleep(1)
-        # save last cursor
-        self.parent.save_cursor(messages[-1]['__CURSOR'])
 
     def get_seq_token(self, log_stream):
         ''' get the sequence token for the stream '''
