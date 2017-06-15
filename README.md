@@ -3,6 +3,8 @@ Send journald logs to AWS CloudWatch
 
 Available on Docker Hub: https://hub.docker.com/r/lincheney/journald-2-cloudwatch/
 
+[![](https://images.microbadger.com/badges/image/lincheney/journald-2-cloudwatch.svg)](https://microbadger.com/images/lincheney/journald-2-cloudwatch "Get your own image badge on microbadger.com")
+
 This is heavily based on https://github.com/arkenio/journald-wrapper.
 
 ## Running in Docker
