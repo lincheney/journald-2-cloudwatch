@@ -12,6 +12,20 @@ import systemd.journal
 import boto3
 import botocore
 
+@lru_cache(1)
+def get_instance_identity_document():
+    URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document'
+    with urllib.request.urlopen(URL) as src:
+        doc = json.load(src)
+    # remove null values and snake case keys
+    return {re.sub(r'([A-Z])', r'_\1', k).upper(): v for k, v in doc.items() if v is not None}
+
+def normalise_unit(unit):
+    if '@' in unit:
+        # remove templating in unit names e.g. sshd@127.0.0.1:12345.service -> sshd.service
+        unit = '.'.join(( unit.partition('@')[0], unit.rpartition('.')[2] ))
+    return unit
+
 class Formatter(string.Formatter):
     '''
     custom string formatter
@@ -34,16 +48,32 @@ class Formatter(string.Formatter):
                 # test for string literal
                 if len(i) > 1 and (i[0] == '"' or i[0] == '"') and i[0] == i[-1]:
                     return i[1:-1]
+
+                # test for special key
+                if i.startswith('$'):
+                    k = i[1:]
+                    # instance identity doc variables
+                    doc = get_instance_identity_document()
+                    if k in doc:
+                        return doc[k]
+
+                    # custom journald variables
+                    if k == 'UNIT':
+                        if 'USER_UNIT' in kwargs:
+                            return normalise_unit(kwargs['USER_UNIT'])
+                        if '_SYSTEMD_UNIT' in kwargs:
+                            return normalise_unit(kwargs['_SYSTEMD_UNIT'])
+                    if k == 'DOCKER_CONTAINER':
+                        if 'CONTAINER_NAME' in msg and msg.get('_SYSTEMD_UNIT') == 'docker.service':
+                            return msg['CONTAINER_NAME']
+
+                # default
                 if i in kwargs:
                     return kwargs[i]
-        return super().get_value(key, args, kwargs)
-Format = Formatter().format
 
-@lru_cache(1)
-def get_instance_id():
-    URL = 'http://169.254.169.254/latest/meta-data/instance-id'
-    with urllib.request.urlopen(URL) as src:
-        return src.read().decode()
+        return super().get_value(key, args, kwargs)
+
+Format = Formatter().format
 
 class JournalMsgEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -63,7 +93,6 @@ class CloudWatchClient:
 
     def group_messages(self, msg):
         ''' returns the group and stream names for this msg '''
-        msg = self.normalise_message(msg)
         group = Format(self.log_group_format, **msg)
         group = self.log_group_client(group)
         stream = Format(self.log_stream_format, **msg)
@@ -77,28 +106,6 @@ class CloudWatchClient:
             pass
         client = self.log_groups[name] = LogGroupClient(name, self)
         return client
-
-    def normalise_unit(self, unit):
-        if '@' in unit:
-            # remove templating in unit names e.g. sshd@127.0.0.1:12345.service -> sshd.service
-            unit = '.'.join(( unit.partition('@')[0], unit.rpartition('.')[2] ))
-        return unit
-
-    def normalise_message(self, msg):
-        ''' add $fields to msg that can be used with the format strings '''
-        msg = msg.copy()
-
-        if 'USER_UNIT' in msg:
-            msg['$UNIT'] = self.normalise_unit(msg['USER_UNIT'])
-        elif '_SYSTEMD_UNIT' in msg:
-            msg['$UNIT'] = self.normalise_unit(msg['_SYSTEMD_UNIT'])
-
-        if 'CONTAINER_NAME' in msg and msg.get('_SYSTEMD_UNIT') == 'docker.service':
-            msg['$DOCKER_CONTAINER'] = msg['CONTAINER_NAME']
-
-        msg['$INSTANCE_ID'] = get_instance_id()
-
-        return msg
 
     def put_log_messages(self, log_group, log_stream, seq_token, messages):
         ''' log the message to cloudwatch '''
