@@ -6,8 +6,9 @@ import urllib.request
 from .identity_doc import IDENTITY_DOC, IDENTITY_DOC_STR
 from main import Format, IDENTITY_DOC_URL, get_instance_identity_document
 
+@patch('main.get_instance_identity_document', return_value=IDENTITY_DOC, autospec=True)
 class FormatterTest(TestCase):
-    def test_default_formatting(self):
+    def test_default_formatting(self, _):
         ''' test formatting is same as default '''
         for fmt, kwargs in [
             ['string', {}],
@@ -19,28 +20,26 @@ class FormatterTest(TestCase):
 
         self.assertRaises(KeyError, Format, '{a}')
 
-    def test_formatting_defaults(self):
+    def test_formatting_defaults(self, _):
         ''' test the a|b|c fallthrough defaulting '''
         self.assertEqual(Format('xyz {a|b|c} 123', a=1, b=2, c=3), 'xyz 1 123')
         self.assertEqual(Format('xyz {a|b|c} 123', b=2, c=3), 'xyz 2 123')
         self.assertEqual(Format('xyz {a|b|c} 123', c=3), 'xyz 3 123')
         self.assertRaises(KeyError, Format, 'xyz {a|b|c} 123')
 
-    def test_string_formatting(self):
+    def test_string_formatting(self, _):
         ''' test when key is a string '''
         self.assertEqual(Format('xyz {a|b|"hello"} 123', b=5), 'xyz 5 123')
         self.assertEqual(Format('xyz {a|b|"hello"} 123'), 'xyz hello 123')
         self.assertEqual(Format("xyz {a|b|'hello'} 123"), 'xyz hello 123')
 
-    @patch('main.get_instance_identity_document', Mock(return_value=IDENTITY_DOC))
-    def test_identity_doc_formatting(self):
+    def test_identity_doc_formatting(self, _):
         ''' test variables in the identity doc '''
         self.assertEqual(Format('xyz {$instanceId}'), 'xyz ' + IDENTITY_DOC['instanceId'])
         self.assertEqual(Format('xyz {$region}'), 'xyz ' + IDENTITY_DOC['region'])
         self.assertEqual(Format('xyz {invalid|$region}'), 'xyz ' + IDENTITY_DOC['region'])
 
-    @patch('main.get_instance_identity_document', Mock(return_value={}))
-    def test_journald_vars(self):
+    def test_journald_vars(self, _):
         ''' test some convenience vars made from journald fields '''
         # test $unit
         self.assertEqual(Format('xyz {$unit}', _SYSTEMD_UNIT='systemd_unit', **{'$unit': 'not used'}), 'xyz systemd_unit')
@@ -54,8 +53,7 @@ class FormatterTest(TestCase):
         self.assertEqual(Format('xyz {$docker_container}', CONTAINER_NAME='container', **{'$docker_container': 'hello'}), 'xyz hello')
         self.assertEqual(Format('xyz {$docker_container}', _SYSTEMD_UNIT='docker.service', **{'$docker_container': 'hello'}), 'xyz hello')
 
-    @patch('main.get_instance_identity_document', Mock(return_value={}))
-    def test_default_special_vars(self):
+    def test_default_special_vars(self, _):
         ''' test when $var not found '''
         self.assertEqual(Format('xyz {$other}', **{'$other': 'hello'}), 'xyz hello')
         self.assertRaises(KeyError, Format, 'xyz {$not_found}')

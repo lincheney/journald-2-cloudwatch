@@ -25,7 +25,7 @@ def get_instance_identity_document():
 def get_region():
     if 'AWS_DEFAULT_REGION' in os.environ:
         return os.environ['AWS_DEFAULT_REGION']
-    return get_instance_identity_document()['REGION']
+    return get_instance_identity_document()['region']
 
 def normalise_unit(unit):
     if '@' in unit:
