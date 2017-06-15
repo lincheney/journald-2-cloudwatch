@@ -47,13 +47,14 @@ class CloudWatchClientTest(TestCase):
         ''' test client init '''
 
         with patch('boto3.client', autospec=True) as boto3:
-            client = self.make_client(sentinel.cursor, sentinel.group, sentinel.stream)
-            self.assertIs(client.cursor_path, sentinel.cursor)
-            self.assertIs(client.log_group_format, sentinel.group)
-            self.assertIs(client.log_stream_format, sentinel.stream)
-            # sets up the cwlogs client
-            self.assertEqual(client.client, boto3.return_value)
-            boto3.assert_called_once_with('logs', region_name=self.REGION)
+            with patch('main.get_region', autospec=True) as get_region:
+                client = self.make_client(sentinel.cursor, sentinel.group, sentinel.stream)
+                self.assertIs(client.cursor_path, sentinel.cursor)
+                self.assertIs(client.log_group_format, sentinel.group)
+                self.assertIs(client.log_stream_format, sentinel.stream)
+                # sets up the cwlogs client
+                self.assertEqual(client.client, boto3.return_value)
+                boto3.assert_called_once_with('logs', region_name=get_region.return_value)
 
     def test_save_cursor(self):
         ''' test the cursor is saved to the file '''
