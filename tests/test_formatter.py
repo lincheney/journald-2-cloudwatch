@@ -1,8 +1,10 @@
 from unittest import TestCase
-from unittest.mock import patch, mock_open
+from unittest.mock import patch, mock_open, Mock
+import json
+import urllib.request
 
 from .identity_doc import IDENTITY_DOC, IDENTITY_DOC_STR
-from main import Format, IDENTITY_DOC_URL
+from main import Format, IDENTITY_DOC_URL, get_instance_identity_document
 
 class FormatterTest(TestCase):
     def test_default_formatting(self):
@@ -30,14 +32,14 @@ class FormatterTest(TestCase):
         self.assertEqual(Format('xyz {a|b|"hello"} 123'), 'xyz hello 123')
         self.assertEqual(Format("xyz {a|b|'hello'} 123"), 'xyz hello 123')
 
-    @patch('urllib.request.urlopen', mock_open(read_data=IDENTITY_DOC_STR))
+    @patch('main.get_instance_identity_document', Mock(return_value=IDENTITY_DOC))
     def test_identity_doc_formatting(self):
         ''' test variables in the identity doc '''
         self.assertEqual(Format('xyz {$instanceId}'), 'xyz ' + IDENTITY_DOC['instanceId'])
         self.assertEqual(Format('xyz {$region}'), 'xyz ' + IDENTITY_DOC['region'])
         self.assertEqual(Format('xyz {invalid|$region}'), 'xyz ' + IDENTITY_DOC['region'])
 
-    @patch('urllib.request.urlopen', mock_open(read_data=IDENTITY_DOC_STR))
+    @patch('main.get_instance_identity_document', Mock(return_value={}))
     def test_journald_vars(self):
         ''' test some convenience vars made from journald fields '''
         # test $unit
@@ -52,8 +54,27 @@ class FormatterTest(TestCase):
         self.assertEqual(Format('xyz {$docker_container}', CONTAINER_NAME='container', **{'$docker_container': 'hello'}), 'xyz hello')
         self.assertEqual(Format('xyz {$docker_container}', _SYSTEMD_UNIT='docker.service', **{'$docker_container': 'hello'}), 'xyz hello')
 
-    @patch('urllib.request.urlopen', mock_open(read_data=IDENTITY_DOC_STR))
+    @patch('main.get_instance_identity_document', Mock(return_value={}))
     def test_default_special_vars(self):
         ''' test when $var not found '''
         self.assertEqual(Format('xyz {$other}', **{'$other': 'hello'}), 'xyz hello')
         self.assertRaises(KeyError, Format, 'xyz {$not_found}')
+
+class InstanceIdentityDocTest(TestCase):
+    DATA = dict(a=123, b='xyz')
+    NULL_DATA = dict(a=123, b='xyz', c=None)
+
+    def setUp(self):
+        # clear the lru_cache every time
+        get_instance_identity_document.cache_clear()
+
+    @patch('urllib.request.urlopen', mock_open(read_data=json.dumps(DATA)))
+    def test_get_instance_identity_document(self):
+        self.assertEqual(get_instance_identity_document(), self.DATA)
+        urllib.request.urlopen.assert_called_with(IDENTITY_DOC_URL)
+
+    @patch('urllib.request.urlopen', mock_open(read_data=json.dumps(NULL_DATA)))
+    def test_none_values_removed(self):
+        ''' it drops where values are null '''
+        self.assertEqual(get_instance_identity_document(), self.DATA)
+        urllib.request.urlopen.assert_called_with(IDENTITY_DOC_URL)
