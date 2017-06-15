@@ -19,7 +19,7 @@ def get_instance_identity_document():
     with urllib.request.urlopen(URL) as src:
         doc = json.load(src)
     # remove null values and snake case keys
-    return {re.sub(r'([A-Z])', r'_\1', k).upper(): v for k, v in doc.items() if v is not None}
+    return {k: v for k, v in doc.items() if v is not None}
 
 def get_region():
     if 'AWS_DEFAULT_REGION' in os.environ:
@@ -64,12 +64,12 @@ class Formatter(string.Formatter):
                         return doc[k]
 
                     # custom journald variables
-                    if k == 'UNIT':
+                    if k == 'unit':
                         if 'USER_UNIT' in kwargs:
                             return normalise_unit(kwargs['USER_UNIT'])
                         if '_SYSTEMD_UNIT' in kwargs:
                             return normalise_unit(kwargs['_SYSTEMD_UNIT'])
-                    if k == 'DOCKER_CONTAINER':
+                    if k == 'docker_container':
                         if 'CONTAINER_NAME' in msg and msg.get('_SYSTEMD_UNIT') == 'docker.service':
                             return msg['CONTAINER_NAME']
 
