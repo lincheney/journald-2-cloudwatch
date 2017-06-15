@@ -6,6 +6,7 @@ import time
 import itertools
 from functools import lru_cache
 import re
+import os
 import string
 
 import systemd.journal
@@ -19,6 +20,11 @@ def get_instance_identity_document():
         doc = json.load(src)
     # remove null values and snake case keys
     return {re.sub(r'([A-Z])', r'_\1', k).upper(): v for k, v in doc.items() if v is not None}
+
+def get_region():
+    if 'AWS_DEFAULT_REGION' in os.environ:
+        return os.environ['AWS_DEFAULT_REGION']
+    return get_instance_identity_document()['REGION']
 
 def normalise_unit(unit):
     if '@' in unit:
@@ -85,7 +91,7 @@ class JournalMsgEncoder(json.JSONEncoder):
 
 class CloudWatchClient:
     def __init__(self, cursor_path, log_group_format, log_stream_format):
-        self.client = boto3.client('logs')
+        self.client = boto3.client('logs', region_name=get_region())
         self.cursor_path = cursor_path
         self.log_group_format = log_group_format
         self.log_stream_format = log_stream_format
