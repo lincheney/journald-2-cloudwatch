@@ -4,11 +4,42 @@ import uuid
 import datetime
 import time
 import itertools
+from functools import lru_cache
+import re
+import string
 
 import systemd.journal
 import boto3
 import botocore
 
+class Formatter(string.Formatter):
+    '''
+    custom string formatter
+    if the key is of the format a|b|c , it will try to use a, b or c in that order
+    strings can also be used with '", but they should not contain |
+
+    >>> Format = Formatter().format
+    >>> Format('{a|b|c}', b=5)
+    '5'
+    >>> Format('{a|b|c}', d=5)
+    Traceback (most recent call last):
+    KeyError: 'a|b|c'
+    >>> Format('{a|"ASD"}')
+    'ASD'
+    '''
+
+    def get_value(self, key, args, kwargs):
+        if isinstance(key, str):
+            for i in key.split('|'):
+                # test for string literal
+                if len(i) > 1 and (i[0] == '"' or i[0] == '"') and i[0] == i[-1]:
+                    return i[1:-1]
+                if i in kwargs:
+                    return kwargs[i]
+        return super().get_value(key, args, kwargs)
+Format = Formatter().format
+
+@lru_cache(1)
 def get_instance_id():
     URL = 'http://169.254.169.254/latest/meta-data/instance-id'
     with urllib.request.urlopen(URL) as src:
@@ -23,50 +54,63 @@ class JournalMsgEncoder(json.JSONEncoder):
         return super().default(obj)
 
 class CloudWatchClient:
-    ALREADY_EXISTS = 'ResourceAlreadyExistsException'
-    THROTTLED = 'ThrottlingException'
-
-    def __init__(self, log_group, cursor_path):
-        self.log_group = log_group
+    def __init__(self, cursor_path, log_group_format, log_stream_format):
         self.client = boto3.client('logs')
         self.cursor_path = cursor_path
-        self.create_log_group()
+        self.log_group_format = log_group_format
+        self.log_stream_format = log_stream_format
+        self.log_groups = {}
 
-    def create_log_group(self):
-        ''' create a log group, ignoring if it exists '''
+    def group_messages(self, msg):
+        ''' returns the group and stream names for this msg '''
+        msg = self.normalise_message(msg)
+        group = Format(self.log_group_format, **msg)
+        group = self.log_group_client(group)
+        stream = Format(self.log_stream_format, **msg)
+        return (group, stream)
+
+    def log_group_client(self, name):
+        ''' get or create a log group client '''
         try:
-            self.client.create_log_group(logGroupName=self.log_group)
-        except botocore.exceptions.ClientError as e:
-            if e.response['Error']['Code'] != self.ALREADY_EXISTS:
-                raise
+            return self.log_groups[name]
+        except KeyError:
+            pass
+        client = self.log_groups[name] = LogGroupClient(name, self)
+        return client
 
-    def create_log_stream(self, log_stream):
-        ''' create a log stream, ignoring if it exists '''
-        try:
-            self.client.create_log_stream(logGroupName=self.log_group, logStreamName=log_stream)
-        except botocore.exceptions.ClientError as e:
-            if e.response['Error']['Code'] != self.ALREADY_EXISTS:
-                raise
+    def normalise_unit(self, unit):
+        if '@' in unit:
+            # remove templating in unit names e.g. sshd@127.0.0.1:12345.service -> sshd.service
+            unit = '.'.join(( unit.partition('@')[0], unit.rpartition('.')[2] ))
+        return unit
 
-    def log_stream_for(self, msg):
-        # docker container
+    def normalise_message(self, msg):
+        ''' add $fields to msg that can be used with the format strings '''
+        msg = msg.copy()
+
+        if 'USER_UNIT' in msg:
+            msg['$UNIT'] = self.normalise_unit(msg['USER_UNIT'])
+        elif '_SYSTEMD_UNIT' in msg:
+            msg['$UNIT'] = self.normalise_unit(msg['_SYSTEMD_UNIT'])
+
         if 'CONTAINER_NAME' in msg and msg.get('_SYSTEMD_UNIT') == 'docker.service':
-            return '{}.container'.format(msg['CONTAINER_NAME'])
+            msg['$DOCKER_CONTAINER'] = msg['CONTAINER_NAME']
 
-        # systemd unit
-        if '_SYSTEMD_UNIT' in msg:
-            unit = msg['_SYSTEMD_UNIT']
-            if '@' in unit:
-                # remove templating in unit names e.g. sshd@127.0.0.1:12345.service -> sshd.service
-                unit = '.'.join(( unit.partition('@')[0], unit.rpartition('.')[2] ))
-            return unit
+        msg['$INSTANCE_ID'] = get_instance_id()
 
-        # syslog
-        if 'SYSLOG_IDENTIFIER' in msg:
-            return msg['SYSLOG_IDENTIFIER']
+        return msg
 
-        # otherwise, log by executable
-        return msg.get('_EXE', '[other]')
+    def put_log_messages(self, log_group, log_stream, seq_token, messages):
+        ''' log the message to cloudwatch '''
+        kwargs = (dict(sequenceToken=seq_token) if seq_token else {})
+        log_events = list(map(self.make_message, messages))
+
+        return self.client.put_log_events(
+            logGroupName=log_group,
+            logStreamName=log_stream,
+            logEvents=log_events,
+            **kwargs
+        )
 
     def make_message(self, message):
         ''' prepare a message to send to cloudwatch '''
@@ -77,19 +121,48 @@ class CloudWatchClient:
         message = json.dumps(message, cls=JournalMsgEncoder)
         return dict(timestamp=timestamp, message=message)
 
-    def put_log_messages(self, log_stream, messages):
-        ''' log the message to cloudwatch '''
-        seq_token = self.get_seq_token(log_stream)
+    @staticmethod
+    def retain_message(message, retention=datetime.timedelta(days=14)):
+        ''' cloudwatch ignores messages older than 14 days '''
+        return (datetime.datetime.now() - message['__REALTIME_TIMESTAMP']) < retention
 
-        kwargs = (dict(sequenceToken=seq_token) if seq_token else {})
-        log_events = list(map(self.make_message, messages))
+    def save_cursor(self, cursor):
+        ''' saves the journal cursor to file '''
+        with open(self.cursor_path, 'w') as f:
+            f.write(cursor)
 
-        self.client.put_log_events(
-            logGroupName=log_group,
-            logStreamName=log_stream,
-            logEvents=log_events,
-            **kwargs
-        )
+    def load_cursor(self):
+        ''' loads the journal cursor from file, returns None if file not found '''
+        try:
+            with open(self.cursor_path, 'r') as f:
+                return f.read().strip()
+        except FileNotFoundError:
+            return
+
+class LogGroupClient:
+    ALREADY_EXISTS = 'ResourceAlreadyExistsException'
+    THROTTLED = 'ThrottlingException'
+
+    def __init__(self, log_group, parent):
+        self.log_group = log_group
+        self.parent = parent
+        self.create_log_group()
+
+    def create_log_group(self):
+        ''' create a log group, ignoring if it exists '''
+        try:
+            self.parent.client.create_log_group(logGroupName=self.log_group)
+        except botocore.exceptions.ClientError as e:
+            if e.response['Error']['Code'] != self.ALREADY_EXISTS:
+                raise
+
+    def create_log_stream(self, log_stream):
+        ''' create a log stream, ignoring if it exists '''
+        try:
+            self.parent.client.create_log_stream(logGroupName=self.log_group, logStreamName=log_stream)
+        except botocore.exceptions.ClientError as e:
+            if e.response['Error']['Code'] != self.ALREADY_EXISTS:
+                raise
 
     def group_messages(self, messages, maxlen=10, timespan=datetime.timedelta(hours=23)):
         '''
@@ -117,7 +190,8 @@ class CloudWatchClient:
 
         while True:
             try:
-                self.put_log_messages(log_stream, messages)
+                seq_token = self.get_seq_token(log_stream)
+                self.parent.put_log_messages(self.log_group, log_stream, seq_token, messages)
             except botocore.exceptions.ClientError as e:
                 if e.response['Error']['Code'] != self.THROTTLED:
                     raise
@@ -125,12 +199,12 @@ class CloudWatchClient:
                 break
             time.sleep(1)
         # save last cursor
-        self.save_cursor(messages[-1]['__CURSOR'])
+        self.parent.save_cursor(messages[-1]['__CURSOR'])
 
     def get_seq_token(self, log_stream):
         ''' get the sequence token for the stream '''
 
-        streams = self.client.describe_log_streams(logGroupName=self.log_group, logStreamNamePrefix=log_stream, limit=1)
+        streams = self.parent.client.describe_log_streams(logGroupName=self.log_group, logStreamNamePrefix=log_stream, limit=1)
         if streams['logStreams']:
             stream = streams['logStreams'][0]
             if stream['logStreamName'] == log_stream:
@@ -139,46 +213,20 @@ class CloudWatchClient:
         # no stream, create it
         self.create_log_stream(log_stream)
 
-    @staticmethod
-    def retain_message(message, retention=datetime.timedelta(days=14)):
-        ''' cloudwatch ignores messages older than 14 days '''
-        return (datetime.datetime.now() - message['__REALTIME_TIMESTAMP']) < retention
-
-    def save_cursor(self, cursor):
-        ''' saves the journal cursor to file '''
-        with open(self.cursor_path, 'w') as f:
-            f.write(cursor)
-
-    def load_cursor(self):
-        ''' loads the journal cursor from file, returns None if file not found '''
-        try:
-            with open(self.cursor_path, 'r') as f:
-                return f.read().strip()
-        except FileNotFoundError:
-            return
-
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cursor', required=True,
+    parser.add_argument('-c', '--cursor', required=True,
                         help='Store/read the journald cursor in this file')
     parser.add_argument('--logs', default='/var/log/journal',
                         help='Directory to journald logs (default: %(default)s)')
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument('--prefix', default='',
-                       help='Log group prefix (default is blank). Log group will be {prefix}_{instance_id}')
-    group.add_argument('--log-group',
-                       help='Name of the log group to use')
+    parser.add_argument('-g', '--log-group-format', required=True,
+                       help='Python format string for log group names')
+    parser.add_argument('-s', '--log-stream-format', required=True,
+                       help='Python format string for log stream names')
     args = parser.parse_args()
 
-    if args.log_group:
-        log_group = args.log_group
-    else:
-        log_group = get_instance_id()
-        if args.prefix:
-            log_group = '{}_{}'.format(args.prefix, log_group)
-
-    client = CloudWatchClient(log_group, args.cursor)
+    client = CloudWatchClient(args.cursor, args.log_group_format, args.log_stream_format)
 
     while True:
         cursor = client.load_cursor()
@@ -191,5 +239,5 @@ if __name__ == '__main__':
                 reader.seek_head()
 
             reader = filter(CloudWatchClient.retain_message, reader)
-            for log_stream, messages in itertools.groupby(reader, key=client.log_stream_for):
-                client.log_messages(log_stream, list(messages))
+            for (group, stream), messages in itertools.groupby(reader, key=client.group_messages):
+                group.log_messages(stream, list(messages))
