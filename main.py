@@ -13,10 +13,11 @@ import systemd.journal
 import boto3
 import botocore
 
+IDENTITY_DOC_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document'
+
 @lru_cache(1)
 def get_instance_identity_document():
-    URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document'
-    with urllib.request.urlopen(URL) as src:
+    with urllib.request.urlopen(IDENTITY_DOC_URL) as src:
         doc = json.load(src)
     # remove null values and snake case keys
     return {k: v for k, v in doc.items() if v is not None}
@@ -52,7 +53,7 @@ class Formatter(string.Formatter):
         if isinstance(key, str):
             for i in key.split('|'):
                 # test for string literal
-                if len(i) > 1 and (i[0] == '"' or i[0] == '"') and i[0] == i[-1]:
+                if len(i) > 1 and (i[0] == '"' or i[0] == "'") and i[0] == i[-1]:
                     return i[1:-1]
 
                 # test for special key
@@ -70,8 +71,8 @@ class Formatter(string.Formatter):
                         if '_SYSTEMD_UNIT' in kwargs:
                             return normalise_unit(kwargs['_SYSTEMD_UNIT'])
                     if k == 'docker_container':
-                        if 'CONTAINER_NAME' in msg and msg.get('_SYSTEMD_UNIT') == 'docker.service':
-                            return msg['CONTAINER_NAME']
+                        if 'CONTAINER_NAME' in kwargs and kwargs.get('_SYSTEMD_UNIT') == 'docker.service':
+                            return kwargs['CONTAINER_NAME']
 
                 # default
                 if i in kwargs:
