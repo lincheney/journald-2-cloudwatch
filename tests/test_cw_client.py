@@ -112,6 +112,13 @@ class CloudWatchClientTest(TestCase):
         self.assertIs(group.parent, self.client)
         self.assertEqual(group.log_group, 'group-name')
 
+    def test_log_group_client_cached(self):
+        ''' test log group client creation is cached '''
+
+        group = self.client.log_group_client('group-name')
+        group2 = self.client.log_group_client('group-name')
+        self.assertIs(group, group2)
+
     def test_group_messages(self):
         ''' test making group and stream names from msg '''
 

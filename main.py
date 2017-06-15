@@ -96,7 +96,6 @@ class CloudWatchClient:
         self.cursor_path = cursor_path
         self.log_group_format = log_group_format
         self.log_stream_format = log_stream_format
-        self.log_groups = {}
 
     def group_messages(self, msg):
         ''' returns the group and stream names for this msg '''
@@ -105,14 +104,10 @@ class CloudWatchClient:
         stream = Format(self.log_stream_format, **msg)
         return (group, stream)
 
+    @lru_cache(None)
     def log_group_client(self, name):
         ''' get or create a log group client '''
-        try:
-            return self.log_groups[name]
-        except KeyError:
-            pass
-        client = self.log_groups[name] = LogGroupClient(name, self)
-        return client
+        return LogGroupClient(name, self)
 
     def put_log_messages(self, log_group, log_stream, seq_token, messages):
         ''' log the message to cloudwatch, then save the cursor '''
