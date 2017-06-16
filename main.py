@@ -13,6 +13,8 @@ import boto3
 import botocore
 
 IDENTITY_DOC_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document'
+# cloudwatch ignores messages older than 14 days
+OLDEST_LOG_RETENTION = datetime.timedelta(days=14)
 
 @lru_cache(1)
 def get_instance_identity_document():
@@ -134,7 +136,7 @@ class CloudWatchClient:
         return dict(timestamp=timestamp, message=message)
 
     @staticmethod
-    def retain_message(message, retention=datetime.timedelta(days=14)):
+    def retain_message(message, retention=OLDEST_LOG_RETENTION):
         ''' cloudwatch ignores messages older than 14 days '''
         return (datetime.datetime.now() - message['__REALTIME_TIMESTAMP']) < retention
 
@@ -158,9 +160,8 @@ class CloudWatchClient:
             if cursor:
                 reader.seek_cursor(cursor)
             else:
-                # no cursor, start from start of this boot
-                reader.this_boot()
-                reader.seek_head()
+                # no cursor, start from 14 days ago
+                reader.seek_realtime(datetime.datetime.now() - OLDEST_LOG_RETENTION)
 
             reader = filter(self.retain_message, reader)
             for (group, stream), messages in itertools.groupby(reader, key=self.group_messages):

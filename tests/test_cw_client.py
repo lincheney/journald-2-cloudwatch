@@ -15,7 +15,7 @@ except ImportError:
     from . import systemd_journal_mock
     import systemd.journal
 
-from main import get_region, CloudWatchClient, JournalMsgEncoder, LogGroupClient, Format
+from main import get_region, CloudWatchClient, JournalMsgEncoder, LogGroupClient, Format, OLDEST_LOG_RETENTION
 
 class RegionTest(TestCase):
     ''' tests for get_region() '''
@@ -205,13 +205,16 @@ class CloudWatchClientTest(TestCase):
     def test_upload_journal_logs_no_cursor(self):
         ''' test upload_journal_logs() when no cursor '''
 
-        with patch.object(self.client, 'load_cursor', return_value=None, autospec=True):
-            self.mock_upload_journal_logs()
+        now = datetime.now()
+        with patch('datetime.datetime', autospec=True) as dt:
+            dt.now.return_value = now
+            with patch.object(self.client, 'load_cursor', return_value=None, autospec=True):
+                self.mock_upload_journal_logs()
 
         # creates a reader
         self.reader.assert_called_once_with(path=sentinel.log_path)
         # seeks to start of this boot
-        self.readercm.assert_has_calls([ call.this_boot(), call.seek_head() ])
+        self.readercm.seek_realtime.assert_called_once_with(now - OLDEST_LOG_RETENTION)
         # uploads log messages
         self.log_group1.log_messages.assert_called_once_with('stream1', [sentinel.msg1])
         self.log_group2.log_messages.assert_called_once_with('stream2', [sentinel.msg3, sentinel.msg4])
