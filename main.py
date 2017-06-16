@@ -170,6 +170,7 @@ class CloudWatchClient:
 class LogGroupClient:
     ALREADY_EXISTS = 'ResourceAlreadyExistsException'
     THROTTLED = 'ThrottlingException'
+    OPERATION_ABORTED = 'OperationAbortedException'
 
     def __init__(self, log_group, parent):
         self.log_group = log_group
@@ -222,11 +223,15 @@ class LogGroupClient:
                 seq_token = self.get_seq_token(log_stream)
                 self.parent.put_log_messages(self.log_group, log_stream, seq_token, messages)
             except botocore.exceptions.ClientError as e:
-                if e.response['Error']['Code'] != self.THROTTLED:
+                code = e.response['Error']['Code']
+                if code == self.THROTTLED:
+                    time.sleep(1)
+                elif code == self.OPERATION_ABORTED:
+                    pass
+                else:
                     raise
             else:
                 break
-            time.sleep(1)
 
     def get_seq_token(self, log_stream):
         ''' get the sequence token for the stream '''

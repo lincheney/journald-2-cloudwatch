@@ -111,40 +111,39 @@ class LogGroupClientTest(TestCase):
         # no aws api calls
         self.assertEqual(len(self.cwl.mock_calls), 0)
 
+    def mock_log_messages(self, seq_token=[sentinel.token], **kwargs):
+        with patch.object(self.client, 'get_seq_token', side_effect=seq_token, autospec=True) as self.get_seq_token:
+            with patch.object(self.parent, 'put_log_messages', autospec=True, **kwargs) as self.put_log_messages:
+                self.client._log_messages(self.STREAM, sentinel.messages)
+
     def test_log_messages(self):
         ''' log_messages() uploads logs to cloudwatch '''
 
-        with patch.object(self.client, 'get_seq_token', return_value=sentinel.token, autospec=True) as get_seq_token:
-            with patch.object(self.parent, 'put_log_messages', autospec=True) as put_log_messages:
-                self.client._log_messages(self.STREAM, sentinel.messages)
-
-        get_seq_token.assert_called_once_with(self.STREAM)
-        put_log_messages.assert_called_once_with(self.GROUP, self.STREAM, sentinel.token, sentinel.messages)
+        self.mock_log_messages()
+        self.get_seq_token.assert_called_once_with(self.STREAM)
+        self.put_log_messages.assert_called_once_with(self.GROUP, self.STREAM, sentinel.token, sentinel.messages)
 
     @patch('time.sleep')
     def test_log_messages_throttled(self, sleep):
         ''' log_messages() retries if throttled '''
 
-        error = ClientError(dict(Error=dict(Code='ThrottlingException')), '')
+        error = ClientError({'Error': {'Code': 'ThrottlingException'}}, '')
         tokens = [sentinel.token1, sentinel.token2, sentinel.token3]
-        puts = [error, error, None]
+        self.mock_log_messages(seq_token=tokens, side_effect=[error, error, None])
+        self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in tokens])
 
-        with patch.object(self.client, 'get_seq_token', side_effect=tokens, autospec=True) as get_seq_token:
-            with patch.object(self.parent, 'put_log_messages', side_effect=puts, autospec=True) as put_log_messages:
-                self.client._log_messages(self.STREAM, sentinel.messages)
+    def test_log_messages_operation_aborted(self):
+        ''' log_messages() retries if aborted '''
 
-        get_seq_token.assert_has_calls([ call(self.STREAM) ] * 3)
-        put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in tokens])
+        error = ClientError({'Error': {'Code': 'OperationAbortedException'}}, '')
+        tokens = [sentinel.token1, sentinel.token2, sentinel.token3]
+        self.mock_log_messages(seq_token=tokens, side_effect=[error, error, None])
+        self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in tokens])
 
     def test_log_messages_error(self):
         ''' log_messages() propagates other errors '''
 
-        error = ClientError(dict(Error=dict(Code='some other error')), '')
-        def raise_error(*args):
-            raise error
-
-        with patch.object(self.client, 'get_seq_token', return_value=sentinel.token, autospec=True) as get_seq_token:
-            with patch.object(self.parent, 'put_log_messages', side_effect=raise_error, autospec=True) as put_log_messages:
-                with self.assertRaises(ClientError) as cm:
-                    self.client._log_messages(self.STREAM, sentinel.messages)
-                    self.assertEqual(cm, error)
+        error = ClientError({'Error': {'Code': 'some other error'}}, '')
+        with self.assertRaises(ClientError) as cm:
+            self.mock_log_messages(side_effect=[error])
+            self.assertEqual(cm, error)
