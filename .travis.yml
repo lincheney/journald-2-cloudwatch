@@ -4,8 +4,11 @@ python:
   - "3.4"
   - "3.5"
   - "3.6"
+before_install:
+  - sudo apt-get -qq update
+  - sudo apt-get install -y libsystemd-journal-dev
 install:
-  - "pip install coveralls moto"
+  - pip install coveralls moto systemd-python
 script:
   coverage run --source=main -m unittest
 after_success:
