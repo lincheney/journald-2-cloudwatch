@@ -1,5 +1,4 @@
 FROM journald-2-cloudwatch
 
 RUN pip install moto coverage coveralls
-COPY tests /tests
 ENTRYPOINT ["/bin/bash", "-c", "coverage run --source=main -m unittest && coveralls"]
