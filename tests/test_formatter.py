@@ -23,7 +23,7 @@ IDENTITY_DOC_STR = b'''{
 }
 '''
 
-IDENTITY_DOC = json.loads(IDENTITY_DOC_STR)
+IDENTITY_DOC = json.loads(IDENTITY_DOC_STR.decode('utf-8'))
 
 @patch('main.get_instance_identity_document', return_value=IDENTITY_DOC, autospec=True)
 class FormatterTest(TestCase):
