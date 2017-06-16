@@ -171,6 +171,8 @@ class LogGroupClient:
     ALREADY_EXISTS = 'ResourceAlreadyExistsException'
     THROTTLED = 'ThrottlingException'
     OPERATION_ABORTED = 'OperationAbortedException'
+    INVALID_TOKEN = 'InvalidSequenceTokenException'
+    NEXT_TOKEN_REGEX = re.compile('sequenceToken(\sis)?: (\S+)')
 
     def __init__(self, log_group, parent):
         self.log_group = log_group
@@ -218,19 +220,32 @@ class LogGroupClient:
         if not messages:
             return
 
+        seq_token = None
         while True:
-            try:
+            if seq_token is None:
                 seq_token = self.get_seq_token(log_stream)
+
+            try:
                 self.parent.put_log_messages(self.log_group, log_stream, seq_token, messages)
             except botocore.exceptions.ClientError as e:
+                seq_token = None
                 code = e.response['Error']['Code']
                 if code == self.THROTTLED:
+                    # throttled, wait a bit and retry
                     time.sleep(1)
                 elif code == self.OPERATION_ABORTED:
+                    # aborted, retry
                     pass
+                elif code == self.INVALID_TOKEN:
+                    # invalid token, use the given token (if any)
+                    match = self.NEXT_TOKEN_REGEX.search(e.response['Error']['Message'])
+                    if match:
+                        seq_token = match.group(2)
                 else:
+                    # other error
                     raise
             else:
+                # no error, finish
                 break
 
     def get_seq_token(self, log_stream):

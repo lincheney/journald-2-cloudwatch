@@ -7,6 +7,9 @@ from botocore.exceptions import ClientError
 
 from main import CloudWatchClient, LogGroupClient
 
+def client_error(code, msg='', op=''):
+    return ClientError({'Error': {'Code': code, 'Message': msg}}, op)
+
 @mock_cloudwatch
 class LogGroupClientTest(TestCase):
     GROUP = 'log group'
@@ -35,13 +38,13 @@ class LogGroupClientTest(TestCase):
     def test_create_log_group_exists(self):
         ''' if log group exists it ignores the error '''
 
-        with patch.object(self.cwl, 'create_log_group', side_effect=ClientError({'Error': {'Code': 'ResourceAlreadyExistsException'}}, '')):
+        with patch.object(self.cwl, 'create_log_group', side_effect=client_error('ResourceAlreadyExistsException')):
             self.client.create_log_group()
 
     def test_create_log_group_other_error(self):
         ''' creating log groups propagates other errors '''
 
-        with patch.object(self.cwl, 'create_log_group', side_effect=ClientError({'Error': {'Code': 'other error'}}, '')):
+        with patch.object(self.cwl, 'create_log_group', side_effect=client_error('other error')):
             with self.assertRaises(ClientError):
                 self.client.create_log_group()
 
@@ -54,13 +57,13 @@ class LogGroupClientTest(TestCase):
     def test_create_log_stream_exists(self):
         ''' if log stream exists it ignores the error '''
 
-        with patch.object(self.cwl, 'create_log_stream', side_effect=ClientError({'Error': {'Code': 'ResourceAlreadyExistsException'}}, '')):
+        with patch.object(self.cwl, 'create_log_stream', side_effect=client_error('ResourceAlreadyExistsException')):
             self.client.create_log_stream(self.STREAM)
 
     def test_create_log_stream_other_error(self):
         ''' creating log streams propagates other errors '''
 
-        with patch.object(self.cwl, 'create_log_stream', side_effect=ClientError({'Error': {'Code': 'other error'}}, '')):
+        with patch.object(self.cwl, 'create_log_stream', side_effect=client_error('other error')):
             with self.assertRaises(ClientError):
                 self.client.create_log_stream(self.STREAM)
 
@@ -127,7 +130,7 @@ class LogGroupClientTest(TestCase):
     def test_log_messages_throttled(self, sleep):
         ''' log_messages() retries if throttled '''
 
-        error = ClientError({'Error': {'Code': 'ThrottlingException'}}, '')
+        error = client_error('ThrottlingException')
         tokens = [sentinel.token1, sentinel.token2, sentinel.token3]
         self.mock_log_messages(seq_token=tokens, side_effect=[error, error, None])
         self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in tokens])
@@ -135,15 +138,31 @@ class LogGroupClientTest(TestCase):
     def test_log_messages_operation_aborted(self):
         ''' log_messages() retries if aborted '''
 
-        error = ClientError({'Error': {'Code': 'OperationAbortedException'}}, '')
+        error = client_error('OperationAbortedException')
         tokens = [sentinel.token1, sentinel.token2, sentinel.token3]
         self.mock_log_messages(seq_token=tokens, side_effect=[error, error, None])
+        self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in tokens])
+
+    def test_log_messages_invalid_token(self):
+        ''' log_messages() retries with new token '''
+
+        token = 'hereisacloudwatchtoken'
+        error = client_error('InvalidSequenceTokenException', msg='The given sequenceToken is invalid. The next expected sequenceToken is: ' + token)
+        self.mock_log_messages(side_effect=[error, None])
+        self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in (sentinel.token, token)])
+
+    def test_log_messages_invalid_token(self):
+        ''' log_messages() fetches new token and retries '''
+
+        error = client_error('InvalidSequenceTokenException', msg='blargh')
+        tokens = [sentinel.token1, sentinel.token2]
+        self.mock_log_messages(seq_token=tokens, side_effect=[error, None])
         self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in tokens])
 
     def test_log_messages_error(self):
         ''' log_messages() propagates other errors '''
 
-        error = ClientError({'Error': {'Code': 'some other error'}}, '')
+        error = client_error('other error')
         with self.assertRaises(ClientError) as cm:
             self.mock_log_messages(side_effect=[error])
             self.assertEqual(cm, error)
