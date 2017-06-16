@@ -9,4 +9,6 @@ install:
 before_script:
   - 'env | grep TRAVIS > env'
 script:
-  docker run --env-file=env --rm -v `pwd`/tests:/tests -v `pwd`/.git:/.git journald-2-cloudwatch-test
+  docker run --env-file=env --rm -v `pwd`:`pwd` -w `pwd` journald-2-cloudwatch-test
+after_success:
+  coveralls
