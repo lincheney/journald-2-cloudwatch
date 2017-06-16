@@ -262,7 +262,7 @@ class LogGroupClient:
         # no stream, create it
         self.create_log_stream(log_stream)
 
-if __name__ == '__main__':
+if __name__ == '__main__': # pragma: no cover
     import argparse
     import systemd.journal
 
