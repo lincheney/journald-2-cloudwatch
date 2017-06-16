@@ -1,5 +1,6 @@
 FROM journald-2-cloudwatch
 
-RUN pip install moto coverage
+RUN pip install moto coverage && \
+    echo -e '[run]\ndata_file=/coverage/.coverage' > /.coveragerc
 COPY tests /tests
 ENTRYPOINT ["coverage", "run", "--source=main", "-m", "unittest"]
