@@ -10,8 +10,7 @@ class Reader:
 
 class _ReaderCm:
     def seek_cursor(self, cursor): pass
-    def this_boot(self): pass
-    def seek_head(self): pass
+    def seek_realtime(self): pass
     def __iter__(self): yield from ()
 
 systemd = NonCallableMock(
