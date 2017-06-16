@@ -1,12 +1,15 @@
 from unittest import TestCase
-from unittest.mock import patch, sentinel, call, create_autospec
+from unittest.mock import patch, sentinel, call, create_autospec, Mock, MagicMock, DEFAULT
 import tempfile
 import os
 import uuid
 import json
+import sys
 from datetime import datetime, timedelta
 from moto import mock_cloudwatch
 
+from . import systemd_journal_mock
+import systemd.journal
 from main import get_region, CloudWatchClient, JournalMsgEncoder, LogGroupClient, Format
 
 class RegionTest(TestCase):
@@ -29,7 +32,8 @@ class RegionTest(TestCase):
 
 @mock_cloudwatch
 class CloudWatchClientTest(TestCase):
-    CURSOR = '/cursor'
+    CURSOR = os.path.dirname(__file__) + '/cursor.txt'
+    CURSOR_CONTENT = open(CURSOR).read().rstrip('\n')
     GROUP = 'log group'
     STREAM = 'log stream '
     REGION = 'us-east-1'
@@ -165,3 +169,44 @@ class CloudWatchClientTest(TestCase):
         )
         # saves the cursor once finished
         save_cursor.assert_called_once_with(sentinel.cursor)
+
+    def mock_upload_journal_logs(self):
+        reader = systemd.journal.Reader('path')
+        readercm = reader.__enter__()
+
+        with patch('systemd.journal.Reader', return_value=MagicMock(spec_set=reader), autospec=True) as self.reader:
+            with patch.multiple(self.client, retain_message=DEFAULT, group_messages=DEFAULT):
+                self.readercm = self.reader.return_value.__enter__.return_value = MagicMock(wraps=readercm)
+                self.readercm.__iter__.return_value = [sentinel.msg1, sentinel.msg2, sentinel.msg3, sentinel.msg4]
+                self.log_group1 = Mock()
+                self.log_group2 = Mock()
+                self.client.retain_message.side_effect = [True, False, True, True]
+                self.client.group_messages.side_effect = [(self.log_group1, 'stream1'), (self.log_group2, 'stream2'), (self.log_group2, 'stream2')]
+
+                self.client.upload_journal_logs(sentinel.log_path)
+
+    def test_upload_journal_logs(self):
+        ''' test upload_journal_logs() when cursor exists '''
+
+        self.mock_upload_journal_logs()
+        # creates a reader
+        self.reader.assert_called_once_with(path=sentinel.log_path)
+        # seeks to the cursor
+        self.readercm.seek_cursor.assert_called_once_with(self.CURSOR_CONTENT)
+        # uploads log messages
+        self.log_group1.log_messages.assert_called_once_with('stream1', [sentinel.msg1])
+        self.log_group2.log_messages.assert_called_once_with('stream2', [sentinel.msg3, sentinel.msg4])
+
+    def test_upload_journal_logs_no_cursor(self):
+        ''' test upload_journal_logs() when no cursor '''
+
+        with patch.object(self.client, 'load_cursor', return_value=None, autospec=True):
+            self.mock_upload_journal_logs()
+
+        # creates a reader
+        self.reader.assert_called_once_with(path=sentinel.log_path)
+        # seeks to start of this boot
+        self.readercm.assert_has_calls([ call.this_boot(), call.seek_head() ])
+        # uploads log messages
+        self.log_group1.log_messages.assert_called_once_with('stream1', [sentinel.msg1])
+        self.log_group2.log_messages.assert_called_once_with('stream2', [sentinel.msg3, sentinel.msg4])

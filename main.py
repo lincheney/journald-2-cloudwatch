@@ -151,6 +151,21 @@ class CloudWatchClient:
         except FileNotFoundError:
             return
 
+    def upload_journal_logs(self, log_path):
+        import systemd.journal
+        cursor = self.load_cursor()
+        with systemd.journal.Reader(path=log_path) as reader:
+            if cursor:
+                reader.seek_cursor(cursor)
+            else:
+                # no cursor, start from start of this boot
+                reader.this_boot()
+                reader.seek_head()
+
+            reader = filter(self.retain_message, reader)
+            for (group, stream), messages in itertools.groupby(reader, key=self.group_messages):
+                group.log_messages(stream, list(messages))
+
 class LogGroupClient:
     ALREADY_EXISTS = 'ResourceAlreadyExistsException'
     THROTTLED = 'ThrottlingException'
@@ -239,18 +254,5 @@ if __name__ == '__main__':
                        help='Python format string for log stream names')
     args = parser.parse_args()
 
-    client = CloudWatchClient(args.cursor, args.log_group_format, args.log_stream_format)
-
     while True:
-        cursor = client.load_cursor()
-        with systemd.journal.Reader(path=args.logs) as reader:
-            if cursor:
-                reader.seek_cursor(cursor)
-            else:
-                # no cursor, start from start of this boot
-                reader.this_boot()
-                reader.seek_head()
-
-            reader = filter(CloudWatchClient.retain_message, reader)
-            for (group, stream), messages in itertools.groupby(reader, key=client.group_messages):
-                group.log_messages(stream, list(messages))
+        upload_logs(args.cursor, args.log_group_format, args.log_stream_format)
