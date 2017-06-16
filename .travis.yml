@@ -5,7 +5,7 @@ python:
   - "3.5"
   - "3.6"
 install:
-  - "pip install coveralls systemd-python moto"
+  - "pip install coveralls moto"
 script:
   coverage run --source=main -m unittest
 after_success:

@@ -9,7 +9,6 @@ import re
 import os
 import string
 
-import systemd.journal
 import boto3
 import botocore
 
@@ -227,6 +226,8 @@ class LogGroupClient:
 
 if __name__ == '__main__':
     import argparse
+    import systemd.journal
+
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--cursor', required=True,
                         help='Store/read the journald cursor in this file')
