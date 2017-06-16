@@ -220,15 +220,15 @@ class LogGroupClient:
         if not messages:
             return
 
-        seq_token = None
+        seq_token = -1 # None is special
         while True:
-            if seq_token is None:
+            if seq_token == -1:
                 seq_token = self.get_seq_token(log_stream)
 
             try:
                 self.parent.put_log_messages(self.log_group, log_stream, seq_token, messages)
             except botocore.exceptions.ClientError as e:
-                seq_token = None
+                seq_token = -1
                 code = e.response['Error']['Code']
                 if code == self.THROTTLED:
                     # throttled, wait a bit and retry
@@ -241,6 +241,8 @@ class LogGroupClient:
                     match = self.NEXT_TOKEN_REGEX.search(e.response['Error']['Message'])
                     if match:
                         seq_token = match.group(2)
+                        if seq_token == 'null':
+                            seq_token = None
                 else:
                     # other error
                     raise

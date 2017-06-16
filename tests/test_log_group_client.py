@@ -151,14 +151,14 @@ class LogGroupClientTest(TestCase):
         self.mock_log_messages(side_effect=[error, None])
         self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in (sentinel.token, token)])
 
-    def test_log_messages_invalid_token(self):
+    def test_log_messages_invalid_token_null(self):
         ''' log_messages() retries when invalid token '''
 
         error = client_error('InvalidSequenceTokenException', msg='The given sequenceToken is invalid. The next expected sequenceToken is: null')
         self.mock_log_messages(side_effect=[error, None])
         self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in (sentinel.token, None)])
 
-    def test_log_messages_invalid_token(self):
+    def test_log_messages_invalid_token_no_token_given(self):
         ''' log_messages() fetches new token and retries '''
 
         error = client_error('InvalidSequenceTokenException', msg='blargh')
