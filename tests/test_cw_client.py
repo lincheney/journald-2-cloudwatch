@@ -8,8 +8,13 @@ import sys
 from datetime import datetime, timedelta
 from moto import mock_cloudwatch
 
-from . import systemd_journal_mock
-import systemd.journal
+# try to import python-systemd, otherwise use the mock
+try:
+    import systemd.journal
+except ImportError:
+    from . import systemd_journal_mock
+    import systemd.journal
+
 from main import get_region, CloudWatchClient, JournalMsgEncoder, LogGroupClient, Format
 
 class RegionTest(TestCase):
@@ -171,12 +176,12 @@ class CloudWatchClientTest(TestCase):
         save_cursor.assert_called_once_with(sentinel.cursor)
 
     def mock_upload_journal_logs(self):
-        reader = systemd.journal.Reader('path')
+        reader = systemd.journal.Reader(path=os.getcwd())
         readercm = reader.__enter__()
 
         with patch('systemd.journal.Reader', return_value=MagicMock(spec_set=reader), autospec=True) as self.reader:
             with patch.multiple(self.client, retain_message=DEFAULT, group_messages=DEFAULT):
-                self.readercm = self.reader.return_value.__enter__.return_value = MagicMock(wraps=readercm)
+                self.readercm = self.reader.return_value.__enter__.return_value = MagicMock(spec_set=readercm)
                 self.readercm.__iter__.return_value = [sentinel.msg1, sentinel.msg2, sentinel.msg3, sentinel.msg4]
                 self.log_group1 = Mock()
                 self.log_group2 = Mock()
