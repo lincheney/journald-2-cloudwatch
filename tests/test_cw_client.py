@@ -8,7 +8,12 @@ import sys
 from datetime import datetime, timedelta
 from moto import mock_cloudwatch
 
-import systemd.journal
+# try to import python-systemd, otherwise use the mock
+try:
+    import systemd.journal
+except ImportError:
+    from . import systemd_journal_mock
+    import systemd.journal
 
 from main import get_region, CloudWatchClient, JournalMsgEncoder, LogGroupClient, Format, OLDEST_LOG_RETENTION
 
