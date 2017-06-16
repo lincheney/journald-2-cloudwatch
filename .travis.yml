@@ -1,3 +1,4 @@
+language: python
 sudo: required
 services:
   - docker
@@ -5,6 +6,7 @@ services:
 before_install:
   - docker build -t journald-2-cloudwatch -f Dockerfile .
 install:
+  - pip install coveralls
   - docker build -t journald-2-cloudwatch-test -f Dockerfile.test .
 before_script:
   - 'env | grep TRAVIS > env'
