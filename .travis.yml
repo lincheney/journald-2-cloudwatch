@@ -13,7 +13,7 @@ before_install:
 install:
   - pip install coveralls
   - docker build -t journald-2-cloudwatch-test -f Dockerfile.test .
-  - 'mkdir -p ~/docker; docker save journald-2-cloudwatch-test > ~/docker/image.tar'
+  - 'mkdir -p ~/docker; docker save debian:jessie journald-2-cloudwatch journald-2-cloudwatch-test > ~/docker/image.tar'
 
 before_script:
   - 'env | grep TRAVIS > env'
