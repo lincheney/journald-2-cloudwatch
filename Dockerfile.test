@@ -1,5 +1,3 @@
 FROM journald-2-cloudwatch
-
-RUN pip install moto coverage
-COPY tests /tests
-ENTRYPOINT ["coverage", "run", "--source=main", "-m", "unittest"]
+RUN pip install moto coverage coveralls
+ENTRYPOINT ["coverage", "run", "--source=main", "--branch", "-m", "unittest"]
