@@ -13,7 +13,6 @@ before_install:
 install:
   - pip install coveralls
   - docker build -t journald-2-cloudwatch-test -f Dockerfile.test .
-after_install:
   - 'mkdir -p ~/docker; docker save journald-2-cloudwatch-test > ~/docker/image.tar'
 
 before_script:
