@@ -1,0 +1,13 @@
+sudo: required
+services:
+  - docker
+
+before_install:
+  - docker build -t journald-2-cloudwatch -f Dockerfile .
+install:
+  - docker build -t journald-2-cloudwatch-test -f Dockerfile.test .
+script:
+  docker run --rm -v `pwd`/.coveralls:/.coveralls journald-2-cloudwatch-test
+
+after_success:
+  coveralls

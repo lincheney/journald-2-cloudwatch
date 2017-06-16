@@ -9,14 +9,16 @@ import re
 import os
 import string
 
-import systemd.journal
 import boto3
 import botocore
 
+IDENTITY_DOC_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document'
+# cloudwatch ignores messages older than 14 days
+OLDEST_LOG_RETENTION = datetime.timedelta(days=14)
+
 @lru_cache(1)
 def get_instance_identity_document():
-    URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document'
-    with urllib.request.urlopen(URL) as src:
+    with urllib.request.urlopen(IDENTITY_DOC_URL) as src:
         doc = json.load(src)
     # remove null values and snake case keys
     return {k: v for k, v in doc.items() if v is not None}
@@ -24,7 +26,7 @@ def get_instance_identity_document():
 def get_region():
     if 'AWS_DEFAULT_REGION' in os.environ:
         return os.environ['AWS_DEFAULT_REGION']
-    return get_instance_identity_document()['REGION']
+    return get_instance_identity_document()['region']
 
 def normalise_unit(unit):
     if '@' in unit:
@@ -52,7 +54,7 @@ class Formatter(string.Formatter):
         if isinstance(key, str):
             for i in key.split('|'):
                 # test for string literal
-                if len(i) > 1 and (i[0] == '"' or i[0] == '"') and i[0] == i[-1]:
+                if len(i) > 1 and (i[0] == '"' or i[0] == "'") and i[0] == i[-1]:
                     return i[1:-1]
 
                 # test for special key
@@ -70,8 +72,8 @@ class Formatter(string.Formatter):
                         if '_SYSTEMD_UNIT' in kwargs:
                             return normalise_unit(kwargs['_SYSTEMD_UNIT'])
                     if k == 'docker_container':
-                        if 'CONTAINER_NAME' in msg and msg.get('_SYSTEMD_UNIT') == 'docker.service':
-                            return msg['CONTAINER_NAME']
+                        if 'CONTAINER_NAME' in kwargs and kwargs.get('_SYSTEMD_UNIT') == 'docker.service':
+                            return kwargs['CONTAINER_NAME']
 
                 # default
                 if i in kwargs:
@@ -95,7 +97,6 @@ class CloudWatchClient:
         self.cursor_path = cursor_path
         self.log_group_format = log_group_format
         self.log_stream_format = log_stream_format
-        self.log_groups = {}
 
     def group_messages(self, msg):
         ''' returns the group and stream names for this msg '''
@@ -104,28 +105,28 @@ class CloudWatchClient:
         stream = Format(self.log_stream_format, **msg)
         return (group, stream)
 
+    @lru_cache(None)
     def log_group_client(self, name):
         ''' get or create a log group client '''
-        try:
-            return self.log_groups[name]
-        except KeyError:
-            pass
-        client = self.log_groups[name] = LogGroupClient(name, self)
-        return client
+        return LogGroupClient(name, self)
 
     def put_log_messages(self, log_group, log_stream, seq_token, messages):
-        ''' log the message to cloudwatch '''
+        ''' log the message to cloudwatch, then save the cursor '''
         kwargs = (dict(sequenceToken=seq_token) if seq_token else {})
         log_events = list(map(self.make_message, messages))
 
-        return self.client.put_log_events(
+        result = self.client.put_log_events(
             logGroupName=log_group,
             logStreamName=log_stream,
             logEvents=log_events,
             **kwargs
         )
+        # save last cursor
+        self.save_cursor(messages[-1]['__CURSOR'])
+        return result
 
-    def make_message(self, message):
+    @staticmethod
+    def make_message(message):
         ''' prepare a message to send to cloudwatch '''
         timestamp = int(message['__REALTIME_TIMESTAMP'].timestamp() * 1000)
         # remove unserialisable values
@@ -135,7 +136,7 @@ class CloudWatchClient:
         return dict(timestamp=timestamp, message=message)
 
     @staticmethod
-    def retain_message(message, retention=datetime.timedelta(days=14)):
+    def retain_message(message, retention=OLDEST_LOG_RETENTION):
         ''' cloudwatch ignores messages older than 14 days '''
         return (datetime.datetime.now() - message['__REALTIME_TIMESTAMP']) < retention
 
@@ -151,6 +152,20 @@ class CloudWatchClient:
                 return f.read().strip()
         except FileNotFoundError:
             return
+
+    def upload_journal_logs(self, log_path):
+        import systemd.journal
+        cursor = self.load_cursor()
+        with systemd.journal.Reader(path=log_path) as reader:
+            if cursor:
+                reader.seek_cursor(cursor)
+            else:
+                # no cursor, start from 14 days ago
+                reader.seek_realtime(datetime.datetime.now() - OLDEST_LOG_RETENTION)
+
+            reader = filter(self.retain_message, reader)
+            for (group, stream), messages in itertools.groupby(reader, key=self.group_messages):
+                group.log_messages(stream, list(messages))
 
 class LogGroupClient:
     ALREADY_EXISTS = 'ResourceAlreadyExistsException'
@@ -177,7 +192,8 @@ class LogGroupClient:
             if e.response['Error']['Code'] != self.ALREADY_EXISTS:
                 raise
 
-    def group_messages(self, messages, maxlen=10, timespan=datetime.timedelta(hours=23)):
+    @staticmethod
+    def group_messages(messages, maxlen=10, timespan=datetime.timedelta(hours=23)):
         '''
         group messages:
             - in 23 hour segments (cloudwatch rejects logs spanning > 24 hours)
@@ -197,7 +213,7 @@ class LogGroupClient:
             self._log_messages(log_stream, chunk)
 
     def _log_messages(self, log_stream, messages):
-        ''' log the messages, then save the cursor '''
+        ''' log the messages '''
         if not messages:
             return
 
@@ -211,8 +227,6 @@ class LogGroupClient:
             else:
                 break
             time.sleep(1)
-        # save last cursor
-        self.parent.save_cursor(messages[-1]['__CURSOR'])
 
     def get_seq_token(self, log_stream):
         ''' get the sequence token for the stream '''
@@ -228,6 +242,8 @@ class LogGroupClient:
 
 if __name__ == '__main__':
     import argparse
+    import systemd.journal
+
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--cursor', required=True,
                         help='Store/read the journald cursor in this file')
@@ -239,18 +255,5 @@ if __name__ == '__main__':
                        help='Python format string for log stream names')
     args = parser.parse_args()
 
-    client = CloudWatchClient(args.cursor, args.log_group_format, args.log_stream_format)
-
     while True:
-        cursor = client.load_cursor()
-        with systemd.journal.Reader(path=args.logs) as reader:
-            if cursor:
-                reader.seek_cursor(cursor)
-            else:
-                # no cursor, start from start of this boot
-                reader.this_boot()
-                reader.seek_head()
-
-            reader = filter(CloudWatchClient.retain_message, reader)
-            for (group, stream), messages in itertools.groupby(reader, key=client.group_messages):
-                group.log_messages(stream, list(messages))
+        upload_logs(args.cursor, args.log_group_format, args.log_stream_format)
