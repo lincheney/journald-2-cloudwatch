@@ -1,6 +1,5 @@
 FROM journald-2-cloudwatch
 
-RUN pip install moto coverage
-RUN ["/bin/bash", "-c", "echo '[run]\ndata_file=/coverage/.coverage' > /.coveragerc"]
+RUN pip install moto coverage coveralls
 COPY tests /tests
-ENTRYPOINT ["coverage", "run", "--source=main", "-m", "unittest"]
+ENTRYPOINT ["/bin/bash", "-c", "coverage run --source=main -m unittest && coveralls"]
