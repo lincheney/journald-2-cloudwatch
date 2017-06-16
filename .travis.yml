@@ -3,14 +3,23 @@ sudo: required
 services:
   - docker
 
+cache:
+  directories:
+    - $HOME/docker
+
 before_install:
+  - 'if [[ -e ~/docker/image.tar ]]; then docker load -i ~/docker/image.tar; fi'
   - docker build -t journald-2-cloudwatch -f Dockerfile .
 install:
   - pip install coveralls
   - docker build -t journald-2-cloudwatch-test -f Dockerfile.test .
+after_install:
+  - 'mkdir -p ~/docker; docker save journald-2-cloudwatch-test > ~/docker/image.tar'
+
 before_script:
   - 'env | grep TRAVIS > env'
 script:
   docker run --env-file=env --rm -v `pwd`:`pwd` -w `pwd` journald-2-cloudwatch-test
+
 after_success:
   coveralls
