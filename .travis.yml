@@ -1,12 +1,13 @@
-language: python
-python:
-  - "3.3"
-  - "3.4"
-  - "3.5"
-  - "3.6"
+sudo: required
+services:
+  - docker
+
+before_install:
+  - docker build -t journald-2-cloudwatch .
 install:
-  - "pip install coveralls moto"
+  - docker build -t journald-2-cloudwatch-test .
 script:
-  coverage run --source=main -m unittest
+  docker run --rm -v `pwd`/.coveralls:/.coveralls journald-2-cloudwatch-test
+
 after_success:
   coveralls
