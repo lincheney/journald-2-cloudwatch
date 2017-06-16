@@ -140,8 +140,11 @@ class LogGroupClientTest(TestCase):
         ''' log_messages() propagates other errors '''
 
         error = ClientError(dict(Error=dict(Code='some other error')), '')
+        def raise_error(*args):
+            raise error
+
         with patch.object(self.client, 'get_seq_token', return_value=sentinel.token, autospec=True) as get_seq_token:
-            with patch.object(self.parent, 'put_log_messages', side_effect=error, autospec=True) as put_log_messages:
+            with patch.object(self.parent, 'put_log_messages', side_effect=raise_error, autospec=True) as put_log_messages:
                 with self.assertRaises(ClientError) as cm:
                     self.client._log_messages(self.STREAM, sentinel.messages)
                     self.assertEqual(cm, error)
