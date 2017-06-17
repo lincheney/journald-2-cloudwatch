@@ -190,3 +190,12 @@ class LogGroupClientTest(TestCase):
         with self.assertRaises(ClientError) as cm:
             self.mock_log_messages(side_effect=[error])
             self.assertEqual(cm, error)
+
+    def test_real_log_messages(self):
+        chunks = [sentinel.chunk1, sentinel.chunk2, sentinel.chunk3]
+        with patch.object(self.client, 'group_messages', return_value=chunks, autospec=True):
+            with patch.object(self.client, '_log_messages', autospec=True):
+                self.client.log_messages(self.STREAM, sentinel.messages)
+
+                self.client.group_messages.assert_called_once_with(sentinel.messages)
+                self.client._log_messages.assert_has_calls([call(self.STREAM, c) for c in chunks])

@@ -37,6 +37,7 @@ class FormatterTest(TestCase):
         ]:
             self.assertEqual(Format(fmt, **kwargs), fmt.format(**kwargs))
 
+        self.assertEqual(Format('{}', 123), '{}'.format(123))
         self.assertRaises(KeyError, Format, '{a}')
 
     def test_formatting_defaults(self, _):
