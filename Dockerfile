@@ -1,11 +1,11 @@
 FROM debian:jessie-slim
 
+# install python + pip
 RUN apt-get update && \
-    apt-get install -y python3 && \
+    apt-get install -y python3 curl && \
+    curl --fail 'https://bootstrap.pypa.io/get-pip.py' | python3 && \
+    apt-get purge --auto-remove -y curl && \
     rm -rf /var/lib/apt/lists/*
-
-ADD "https://bootstrap.pypa.io/get-pip.py" /get-pip.py
-RUN python3 /get-pip.py
 
 # install python-systemd
 ENV BUILD_DEPS="python3-dev pkg-config gcc git libsystemd-journal-dev" \
@@ -13,8 +13,7 @@ ENV BUILD_DEPS="python3-dev pkg-config gcc git libsystemd-journal-dev" \
 RUN apt-get update && \
     apt-get install -y $BUILD_DEPS && \
     pip3 install "git+https://github.com/systemd/python-systemd.git/@v$VERSION#egg=systemd" && \
-    apt-get remove -y $BUILD_DEPS && \
-    apt-get autoremove -y && \
+    apt-get purge --auto-remove -y $BUILD_DEPS && \
     rm -rf /var/lib/apt/lists/*
 
 # install boto3
