@@ -5,11 +5,11 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 ADD "https://bootstrap.pypa.io/get-pip.py" /get-pip.py
-RUN python3 /get-pip.py 
+RUN python3 /get-pip.py
 
 # install python-systemd
 ENV BUILD_DEPS="python3-dev pkg-config gcc git libsystemd-journal-dev" \
-    VERSION="231"
+    VERSION="233"
 RUN apt-get update && \
     apt-get install -y $BUILD_DEPS && \
     pip3 install "git+https://github.com/systemd/python-systemd.git/@v$VERSION#egg=systemd" && \
