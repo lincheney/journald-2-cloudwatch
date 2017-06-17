@@ -40,7 +40,7 @@ If journald is configured with `volatile storage` you should mount `/run/log/jou
 docker run -v /run/log/journal/:/var/log/journal/:ro -v /data/journald:/data/journald/:rw lincheney/journald-2-cloudwatch -c ... -g ... -s ...
 ```
 
-The image is based on `debian:jessie`.
+The image is based on `debian:jessie-slim`.
 
 ## CloudWatch log format
 
@@ -57,7 +57,7 @@ The [Python format strings spec](https://docs.python.org/3/library/string.html#f
 
 ### Fields
 
-The following fields are available to use the format strings:
+The following fields are available to use in the format strings:
 * any fields in the journald entry. You can view examples by running `journalctl -o json`.
 * any fields in the [instance identity document](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html), prefixed with `$`, e.g. `$privateIp`. Any fields that are `null` are removed.
 * `$unit` which is the same as `USER_UNIT` or `_SYSTEMD_UNIT`, if they exist, but with templating removed (i.e. `sshd@1234.service` becomes `sshd.service`).
