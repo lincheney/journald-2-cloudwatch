@@ -4,13 +4,10 @@ services:
   - docker
 
 before_install:
-  - 'if [[ -e ~/docker/image.tar ]]; then docker load -i ~/docker/image.tar; fi'
-  - docker images
   - docker build -t journald-2-cloudwatch -f Dockerfile .
 install:
   - pip install coverage
   - docker build -t journald-2-cloudwatch-test -f Dockerfile.test .
-  - 'mkdir -p ~/docker; docker save debian:jessie journald-2-cloudwatch journald-2-cloudwatch-test > ~/docker/image.tar'
 
 script:
   - docker run --rm -v `pwd`:`pwd` -w `pwd` journald-2-cloudwatch-test
