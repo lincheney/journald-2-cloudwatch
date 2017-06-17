@@ -177,6 +177,7 @@ class LogGroupClient:
     def __init__(self, log_group, parent):
         self.log_group = log_group
         self.parent = parent
+        self.tokens = {}
         self.create_log_group()
 
     def create_log_group(self):
@@ -220,15 +221,11 @@ class LogGroupClient:
         if not messages:
             return
 
-        seq_token = -1 # None is special
         while True:
-            if seq_token == -1:
-                seq_token = self.get_seq_token(log_stream)
-
             try:
-                self.parent.put_log_messages(self.log_group, log_stream, seq_token, messages)
+                seq_token = self.get_seq_token(log_stream)
+                result = self.parent.put_log_messages(self.log_group, log_stream, seq_token, messages)
             except botocore.exceptions.ClientError as e:
-                seq_token = -1
                 code = e.response['Error']['Code']
                 if code == self.THROTTLED:
                     # throttled, wait a bit and retry
@@ -240,19 +237,28 @@ class LogGroupClient:
                     # invalid token, use the given token (if any)
                     match = self.NEXT_TOKEN_REGEX.search(e.response['Error']['Message'])
                     if match:
-                        seq_token = match.group(2)
-                        if seq_token == 'null':
-                            seq_token = None
+                        self.tokens[log_stream] = (None if match.group(2) == 'null' else match.group(2))
+                    else:
+                        self.tokens.pop(log_stream)
                 else:
                     # other error
                     raise
             else:
                 # no error, finish
                 break
+        self.tokens[log_stream] = result['nextSequenceToken']
 
     def get_seq_token(self, log_stream):
         ''' get the sequence token for the stream '''
 
+        try:
+            return self.tokens[log_stream]
+        except KeyError:
+            pass
+        token = self.tokens[log_stream] = self.get_new_seq_token(log_stream)
+        return token
+
+    def get_new_seq_token(self, log_stream):
         streams = self.parent.client.describe_log_streams(logGroupName=self.log_group, logStreamNamePrefix=log_stream, limit=1)
         if streams['logStreams']:
             stream = streams['logStreams'][0]

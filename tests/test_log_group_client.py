@@ -15,6 +15,7 @@ class LogGroupClientTest(TestCase):
     GROUP = 'log group'
     STREAM = 'log stream'
     REGION = 'us-east-1'
+    PUT_LOG_EVENTS_RESULT = {'nextSequenceToken': sentinel.next_token}
 
     def setUp(self):
         super().setUp()
@@ -67,33 +68,45 @@ class LogGroupClientTest(TestCase):
             with self.assertRaises(ClientError):
                 self.client.create_log_stream(self.STREAM)
 
-    def test_get_seq_token_empty(self):
+    def test_get_new_seq_token_empty(self):
         ''' no log streams found, it should create the log stream '''
 
         value = dict(logStreams=[])
         self.cwl.describe_log_streams.return_value = value
-        self.client.get_seq_token(self.STREAM)
+        self.client.get_new_seq_token(self.STREAM)
         self.assertEqual(self.cwl.mock_calls, [
             call.describe_log_streams(limit=1, logGroupName=self.GROUP, logStreamNamePrefix=self.STREAM),
             call.create_log_stream(logGroupName=self.GROUP, logStreamName=self.STREAM),
         ])
 
-    def test_get_seq_token_no_match(self):
+    def test_get_new_seq_token_no_match(self):
         ''' no matching log streams found, it should create the log stream '''
 
         value = dict(logStreams=[dict(logStreamName='blargh')])
         self.cwl.describe_log_streams.return_value = value
-        self.client.get_seq_token(self.STREAM)
+        self.client.get_new_seq_token(self.STREAM)
         self.assertEqual(self.cwl.mock_calls, [
             call.describe_log_streams(limit=1, logGroupName=self.GROUP, logStreamNamePrefix=self.STREAM),
             call.create_log_stream(logGroupName=self.GROUP, logStreamName=self.STREAM),
         ])
 
-    def test_get_seq_token(self):
+    def test_get_new_seq_token(self):
         ''' return the seq token '''
 
         value = dict(logStreams=[dict(logStreamName=self.STREAM, uploadSequenceToken=sentinel.token)])
         self.cwl.describe_log_streams.return_value = value
+        self.assertIs( self.client.get_new_seq_token(self.STREAM), sentinel.token )
+
+    def test_get_seq_token(self):
+        ''' it should get a new seq token '''
+
+        with patch.object(self.client, 'get_new_seq_token', return_value=sentinel.token):
+            self.assertIs( self.client.get_seq_token(self.STREAM), sentinel.token )
+
+    def test_get_seq_token_cached(self):
+        ''' it should return a cached seq token '''
+
+        self.client.tokens[self.STREAM] = sentinel.token
         self.assertIs( self.client.get_seq_token(self.STREAM), sentinel.token )
 
     def test_group_messages(self):
@@ -114,57 +127,61 @@ class LogGroupClientTest(TestCase):
         # no aws api calls
         self.assertEqual(len(self.cwl.mock_calls), 0)
 
-    def mock_log_messages(self, seq_token=[sentinel.token], **kwargs):
-        with patch.object(self.client, 'get_seq_token', side_effect=seq_token, autospec=True) as self.get_seq_token:
-            with patch.object(self.parent, 'put_log_messages', autospec=True, **kwargs) as self.put_log_messages:
+    def mock_log_messages(self, seq_token=[sentinel.token], side_effect=[PUT_LOG_EVENTS_RESULT]):
+        with patch.object(self.client, 'get_new_seq_token', side_effect=seq_token, autospec=True) as self.get_new_seq_token:
+            with patch.object(self.parent, 'put_log_messages', autospec=True, side_effect=side_effect) as self.put_log_messages:
                 self.client._log_messages(self.STREAM, sentinel.messages)
 
     def test_log_messages(self):
         ''' log_messages() uploads logs to cloudwatch '''
 
         self.mock_log_messages()
-        self.get_seq_token.assert_called_once_with(self.STREAM)
+        self.get_new_seq_token.assert_called_once_with(self.STREAM)
         self.put_log_messages.assert_called_once_with(self.GROUP, self.STREAM, sentinel.token, sentinel.messages)
+        self.assertIs(self.client.tokens[self.STREAM], sentinel.next_token)
 
     @patch('time.sleep')
     def test_log_messages_throttled(self, sleep):
         ''' log_messages() retries if throttled '''
 
         error = client_error('ThrottlingException')
-        tokens = [sentinel.token1, sentinel.token2, sentinel.token3]
-        self.mock_log_messages(seq_token=tokens, side_effect=[error, error, None])
-        self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in tokens])
+        self.mock_log_messages(side_effect=[error, error, self.PUT_LOG_EVENTS_RESULT])
+        self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, sentinel.token, sentinel.messages) for _ in range(3)])
+        self.assertIs(self.client.tokens[self.STREAM], sentinel.next_token)
 
     def test_log_messages_operation_aborted(self):
         ''' log_messages() retries if aborted '''
 
         error = client_error('OperationAbortedException')
-        tokens = [sentinel.token1, sentinel.token2, sentinel.token3]
-        self.mock_log_messages(seq_token=tokens, side_effect=[error, error, None])
-        self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in tokens])
+        self.mock_log_messages(side_effect=[error, error, self.PUT_LOG_EVENTS_RESULT])
+        self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, sentinel.token, sentinel.messages) for _ in range(3)])
+        self.assertIs(self.client.tokens[self.STREAM], sentinel.next_token)
 
     def test_log_messages_invalid_token(self):
         ''' log_messages() retries with new token '''
 
         token = 'hereisacloudwatchtoken'
         error = client_error('InvalidSequenceTokenException', msg='The given sequenceToken is invalid. The next expected sequenceToken is: ' + token)
-        self.mock_log_messages(side_effect=[error, None])
+        self.mock_log_messages(side_effect=[error, self.PUT_LOG_EVENTS_RESULT])
         self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in (sentinel.token, token)])
+        self.assertIs(self.client.tokens[self.STREAM], sentinel.next_token)
 
     def test_log_messages_invalid_token_null(self):
-        ''' log_messages() retries when invalid token '''
+        ''' log_messages() retries on invalid token with null '''
 
         error = client_error('InvalidSequenceTokenException', msg='The given sequenceToken is invalid. The next expected sequenceToken is: null')
-        self.mock_log_messages(side_effect=[error, None])
+        self.mock_log_messages(side_effect=[error, self.PUT_LOG_EVENTS_RESULT])
         self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in (sentinel.token, None)])
+        self.assertIs(self.client.tokens[self.STREAM], sentinel.next_token)
 
     def test_log_messages_invalid_token_no_token_given(self):
         ''' log_messages() fetches new token and retries '''
 
         error = client_error('InvalidSequenceTokenException', msg='blargh')
         tokens = [sentinel.token1, sentinel.token2]
-        self.mock_log_messages(seq_token=tokens, side_effect=[error, None])
+        self.mock_log_messages(seq_token=tokens, side_effect=[error, self.PUT_LOG_EVENTS_RESULT])
         self.put_log_messages.assert_has_calls([call(self.GROUP, self.STREAM, token, sentinel.messages) for token in tokens])
+        self.assertIs(self.client.tokens[self.STREAM], sentinel.next_token)
 
     def test_log_messages_error(self):
         ''' log_messages() propagates other errors '''
