@@ -73,7 +73,7 @@ class Formatter(string.Formatter):
                             return normalise_unit(kwargs['_SYSTEMD_UNIT'])
                     if k == 'docker_container':
                         if 'CONTAINER_NAME' in kwargs and kwargs.get('_SYSTEMD_UNIT') == 'docker.service':
-                            return kwargs['CONTAINER_NAME']
+                            return kwargs['CONTAINER_NAME'] + '.container'
 
                 # default
                 if i in kwargs:

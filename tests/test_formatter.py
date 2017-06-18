@@ -69,7 +69,7 @@ class FormatterTest(TestCase):
         # test no unit name found
         self.assertEqual(Format('xyz {$unit}', **{'$unit': 'hello'}), 'xyz hello')
         # docker container
-        self.assertEqual(Format('xyz {$docker_container}', _SYSTEMD_UNIT='docker.service', CONTAINER_NAME='container', **{'$docker_container': 'not used'}), 'xyz container')
+        self.assertEqual(Format('xyz {$docker_container}', _SYSTEMD_UNIT='docker.service', CONTAINER_NAME='container', **{'$docker_container': 'not used'}), 'xyz container.container')
         self.assertEqual(Format('xyz {$docker_container}', CONTAINER_NAME='container', **{'$docker_container': 'hello'}), 'xyz hello')
         self.assertEqual(Format('xyz {$docker_container}', _SYSTEMD_UNIT='docker.service', **{'$docker_container': 'hello'}), 'xyz hello')
 
