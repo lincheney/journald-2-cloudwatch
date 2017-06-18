@@ -42,6 +42,12 @@ docker run -v /run/log/journal/:/var/log/journal/:ro -v /data/journald:/data/jou
 
 The image is based on `debian:jessie-slim`.
 
+## Journal cursor
+
+The journal cursor is stored in the file specified in the `--cursor` flag.
+This file should be persisted to disk/placed in a mounted volume; consider using named volumes.
+If not, the process may upload duplicate logs if it is ever restarted.
+
 ## CloudWatch log format
 
 The log group and stream names for each message are configurable via the corresponding command line parameters. They take a **variant** of [Python format strings](https://docs.python.org/3/library/string.html#formatspec) and are evaluated against each message, the fields from the EC2 [instance identity document](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html) and a few custom fields.
@@ -65,10 +71,5 @@ The following fields are available to use in the format strings:
 
 To (almost) replicate the old behaviour of the log stream name, you could use:
 ```
-{$docker_container|$unit|SYSLOG_IDENTIFIER|_EXE|"other]"}
+{$docker_container|$unit|SYSLOG_IDENTIFIER|_EXE|"other"}
 ```
-
-## Journal cursor
-
-The journal cursor is stored in the file specified in the `--cursor` flag.
-This file should be persisted to disk/placed in a mounted volume; consider using named volumes.
