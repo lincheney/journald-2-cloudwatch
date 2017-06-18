@@ -67,7 +67,7 @@ The following fields are available to use in the format strings:
 * any fields in the journald entry. You can view examples by running `journalctl -o json`.
 * any fields in the [instance identity document](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html), prefixed with `$`, e.g. `$privateIp`. Any fields that are `null` are removed.
 * `$unit` which is the same as `USER_UNIT` or `_SYSTEMD_UNIT`, if they exist, but with templating removed (i.e. `sshd@1234.service` becomes `sshd.service`).
-* `$docker_container` which is the same as `CONTAINER_NAME` iff `_SYSTEMD_UNIT` is `docker.service`.
+* `$docker_container` which is the same as `{CONTAINER_NAME}.container` iff `_SYSTEMD_UNIT` is `docker.service`.
 
 To (almost) replicate the old behaviour of the log stream name, you could use:
 ```
