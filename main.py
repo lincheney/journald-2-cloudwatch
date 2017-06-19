@@ -75,6 +75,10 @@ class Formatter(string.Formatter):
                         if 'CONTAINER_NAME' in kwargs and kwargs.get('_SYSTEMD_UNIT') == 'docker.service':
                             return kwargs['CONTAINER_NAME'] + '.container'
 
+                    # environment variables
+                    if k in os.environ:
+                        return os.environ[k]
+
                 # default
                 if i in kwargs:
                     return kwargs[i]

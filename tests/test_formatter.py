@@ -1,5 +1,6 @@
 from unittest import TestCase
 from unittest.mock import patch, mock_open, Mock
+import os
 import json
 import urllib.request
 
@@ -72,6 +73,11 @@ class FormatterTest(TestCase):
         self.assertEqual(Format('xyz {$docker_container}', _SYSTEMD_UNIT='docker.service', CONTAINER_NAME='container', **{'$docker_container': 'not used'}), 'xyz container.container')
         self.assertEqual(Format('xyz {$docker_container}', CONTAINER_NAME='container', **{'$docker_container': 'hello'}), 'xyz hello')
         self.assertEqual(Format('xyz {$docker_container}', _SYSTEMD_UNIT='docker.service', **{'$docker_container': 'hello'}), 'xyz hello')
+
+    def test_env_vars(self, _):
+        ''' test environment variables '''
+        with patch.dict(os.environ, ENV_VAR='hello'):
+            self.assertEqual(Format('xyz {$ENV_VAR}'), 'xyz hello')
 
     def test_default_special_vars(self, _):
         ''' test when $var not found '''
