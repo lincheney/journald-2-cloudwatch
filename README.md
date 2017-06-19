@@ -19,9 +19,9 @@ optional arguments:
   -h, --help            show this help message and exit
   -c CURSOR, --cursor CURSOR
                         Store/read the journald cursor in this file
-  --logs LOGS           Directory to journald logs (default: /var/log/journal)  
+  --logs LOGS           Directory to journald logs (default: /var/log/journal)
   -g LOG_GROUP_FORMAT, --log-group-format LOG_GROUP_FORMAT
-                        Python format string for log group names  
+                        Python format string for log group names
   -s LOG_STREAM_FORMAT, --log-stream-format LOG_STREAM_FORMAT
                         Python format string for log stream names
 ```
@@ -68,6 +68,7 @@ The following fields are available to use in the format strings:
 * any fields in the [instance identity document](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html), prefixed with `$`, e.g. `$privateIp`. Any fields that are `null` are removed.
 * `$unit` which is the same as `USER_UNIT` or `_SYSTEMD_UNIT`, if they exist, but with templating removed (i.e. `sshd@1234.service` becomes `sshd.service`).
 * `$docker_container` which is the same as `{CONTAINER_NAME}.container` iff `_SYSTEMD_UNIT` is `docker.service`.
+* any environment variables, prefixed with `$`, e.g. you could run `XYZ=123 main.py -g '{$XYZ}' ...`.
 
 To (almost) replicate the old behaviour of the log stream name, you could use:
 ```
