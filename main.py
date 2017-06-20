@@ -287,5 +287,6 @@ if __name__ == '__main__': # pragma: no cover
                        help='Python format string for log stream names')
     args = parser.parse_args()
 
+    client = CloudWatchClient(args.cursor, args.log_group_format, args.log_stream_format)
     while True:
-        upload_logs(args.cursor, args.log_group_format, args.log_stream_format)
+        client.upload_journal_logs(args.logs)
