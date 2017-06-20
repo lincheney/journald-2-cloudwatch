@@ -92,12 +92,12 @@ class InstanceIdentityDocTest(TestCase):
         # clear the lru_cache every time
         get_instance_identity_document.cache_clear()
 
-    @patch('urllib.request.urlopen', mock_open(read_data=json.dumps(DATA)))
+    @patch('urllib.request.urlopen', mock_open(read_data=json.dumps(DATA).encode('utf-8')))
     def test_get_instance_identity_document(self):
         self.assertEqual(get_instance_identity_document(), self.DATA)
         urllib.request.urlopen.assert_called_with(IDENTITY_DOC_URL)
 
-    @patch('urllib.request.urlopen', mock_open(read_data=json.dumps(NULL_DATA)))
+    @patch('urllib.request.urlopen', mock_open(read_data=json.dumps(NULL_DATA).encode('utf-8')))
     def test_none_values_removed(self):
         ''' it drops where values are null '''
         self.assertEqual(get_instance_identity_document(), self.DATA)

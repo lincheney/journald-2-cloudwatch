@@ -19,7 +19,7 @@ OLDEST_LOG_RETENTION = datetime.timedelta(days=14)
 @lru_cache(1)
 def get_instance_identity_document():
     with urllib.request.urlopen(IDENTITY_DOC_URL) as src:
-        doc = json.load(src)
+        doc = json.loads(src.read().decode('utf-8'))
     # remove null values and snake case keys
     return {k: v for k, v in doc.items() if v is not None}
 
