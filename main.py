@@ -161,15 +161,32 @@ class CloudWatchClient:
         import systemd.journal
         cursor = self.load_cursor()
         with systemd.journal.Reader(path=log_path) as reader:
-            if cursor:
-                reader.seek_cursor(cursor)
-            else:
-                # no cursor, start from 14 days ago
-                reader.seek_realtime(datetime.datetime.now() - OLDEST_LOG_RETENTION)
-
+            reader = JournaldClient(reader, cursor)
             reader = filter(self.retain_message, reader)
             for (group, stream), messages in itertools.groupby(reader, key=self.group_messages):
                 group.log_messages(stream, list(messages))
+
+class JournaldClient:
+    def __init__(self, reader, cursor):
+        self.reader = reader
+        self.cursor = cursor
+
+        if self.cursor:
+            self.reader.seek_cursor(self.cursor)
+            # skip first log (which matches cursor)
+            self.reader.get_next()
+        else:
+            # no cursor, start from 14 days ago
+            self.reader.seek_realtime(datetime.datetime.now() - OLDEST_LOG_RETENTION)
+
+    def __iter__(self):
+        return self
+    def __next__(self):
+        while True:
+            msg = self.reader.get_next()
+            if msg:
+                return msg
+            self.reader.wait()
 
 class LogGroupClient:
     ALREADY_EXISTS = 'ResourceAlreadyExistsException'
