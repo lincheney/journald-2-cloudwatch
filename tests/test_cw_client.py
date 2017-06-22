@@ -92,6 +92,8 @@ class CloudWatchClientTest(TestCase):
         self.assertTrue(CloudWatchClient.retain_message(dict(__REALTIME_TIMESTAMP=datetime.now() - timedelta(days=1))))
         # drop messages older than 14 days
         self.assertFalse(CloudWatchClient.retain_message(dict(__REALTIME_TIMESTAMP=datetime.now() - timedelta(days=14))))
+        # keep empty message breakers
+        self.assertTrue(CloudWatchClient.retain_message({}))
 
     def test_make_message(self):
         ''' test make_message() serialises the data '''

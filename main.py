@@ -141,6 +141,9 @@ class CloudWatchClient:
     @staticmethod
     def retain_message(message, retention=OLDEST_LOG_RETENTION):
         ''' cloudwatch ignores messages older than 14 days '''
+        if not message:
+            # keep message breakers
+            return True
         return (datetime.datetime.now() - message['__REALTIME_TIMESTAMP']) < retention
 
     def save_cursor(self, cursor):
