@@ -36,6 +36,7 @@ class CloudWatchClientTest(TestCase):
     GROUP = 'log group'
     STREAM = 'log stream '
     REGION = 'us-east-1'
+    tskey = '__REALTIME_TIMESTAMP'
 
     def make_client(self, cursor='/dev/null', group_format='group', stream_format='stream'):
         return CloudWatchClient(cursor, group_format, stream_format)
@@ -122,17 +123,75 @@ class CloudWatchClientTest(TestCase):
         group2 = self.client.log_group_client('group-name')
         self.assertIs(group, group2)
 
-    def test_group_messages(self):
+    def test_get_group_stream(self):
         ''' test making group and stream names from msg '''
 
         msg = {}
         names = [self.GROUP, self.STREAM]
         with patch('main.Format', side_effect=names) as formatter:
-            group, stream = self.client.group_messages(msg)
+            group, stream = self.client.get_group_stream(msg)
 
         self.assertIsInstance(group, LogGroupClient)
         self.assertEqual(group.log_group, self.GROUP)
         self.assertEqual(stream, self.STREAM)
+
+    def test_group_messages_empty_msg(self):
+        ''' group_messages() should break on empty messages '''
+
+        msg = {self.tskey: datetime.now()}
+        msgs = [msg] * 5 + [{}] + [msg] * 4 + [{}, {}] + [msg] * 3 + [{}]
+        key = ('group', 'stream')
+        with patch.object(self.client, 'get_group_stream', return_value=key):
+            chunks = self.client.group_messages(msgs)
+            self.assertEqual(
+                list(chunks),
+                [(key, [msg]*5), (key, [msg]*4), (key, [msg]*3)]
+            )
+
+    def test_group_messages_max_len(self):
+        ''' group_messages() should yield batches of up to size 10 '''
+
+        msg = {self.tskey: datetime.now()}
+        msgs = [msg] * 25
+        key = ('group', 'stream')
+        with patch.object(self.client, 'get_group_stream', return_value=key):
+            chunks = self.client.group_messages(msgs)
+            self.assertEqual(
+                list(chunks),
+                [(key, [msg]*10), (key, [msg]*10), (key, [msg]*5)]
+            )
+
+    def test_group_messages_max_timespan(self):
+        ''' group_messages() should yield batches not spanning > 24h '''
+
+        now = datetime.now()
+        msgs = [{self.tskey: now + timedelta(hours=i*6)} for i in range(10)]
+        key = ('group', 'stream')
+        with patch.object(self.client, 'get_group_stream', return_value=key):
+            chunks = self.client.group_messages(msgs)
+            self.assertEqual(
+                list(chunks),
+                [(key, msgs[:4]), (key, msgs[4:8]), (key, msgs[8:])]
+            )
+
+    def test_group_messages_by_group_stream(self):
+        ''' group_messages() should by the log group and stream '''
+
+        msg = {self.tskey: datetime.now()}
+        msgs = [msg] * 25
+        keys = [i//8 for i in range(25)]
+        with patch.object(self.client, 'get_group_stream', side_effect=keys):
+            chunks = self.client.group_messages(msgs)
+            self.assertEqual(
+                list(chunks),
+                [(0, msgs[:8]), (1, msgs[8:16]), (2, msgs[16:24]), (3, msgs[24:])]
+            )
+
+    def test_group_messages_empty(self):
+        ''' group_messages() with no messages '''
+
+        chunks = self.client.group_messages([])
+        self.assertEqual(list(chunks), [])
 
     def test_put_log_messages(self):
         ''' test put_log_messages() '''
@@ -172,6 +231,8 @@ class CloudWatchClientTest(TestCase):
     def test_upload_journal_logs(self):
         ''' test upload_journal_logs() '''
 
+        tskey = '__REALTIME_TIMESTAMP'
+
         journal = systemd.journal.Reader(path=os.getcwd())
         with patch('systemd.journal.Reader', return_value=journal) as journal:
             with patch('main.JournaldClient', MagicMock(autospec=True)) as reader:
@@ -181,7 +242,10 @@ class CloudWatchClientTest(TestCase):
                     log_group1 = Mock()
                     log_group2 = Mock()
                     self.client.retain_message.side_effect = [True, False, True, True]
-                    self.client.group_messages.side_effect = [(log_group1, 'stream1'), (log_group2, 'stream2'), (log_group2, 'stream2')]
+                    self.client.group_messages.return_value = [
+                        ((log_group1, 'stream1'), [sentinel.msg1]),
+                        ((log_group2, 'stream2'), [sentinel.msg3, sentinel.msg4]),
+                    ]
 
                     self.client.upload_journal_logs(os.getcwd())
 

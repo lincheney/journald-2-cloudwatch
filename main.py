@@ -3,7 +3,6 @@ import json
 import uuid
 import datetime
 import time
-import itertools
 from functools import lru_cache
 import re
 import os
@@ -102,7 +101,7 @@ class CloudWatchClient:
         self.log_group_format = log_group_format
         self.log_stream_format = log_stream_format
 
-    def group_messages(self, msg):
+    def get_group_stream(self, msg):
         ''' returns the group and stream names for this msg '''
         group = Format(self.log_group_format, **msg)
         group = self.log_group_client(group)
@@ -157,19 +156,44 @@ class CloudWatchClient:
         except FileNotFoundError:
             return
 
+    def group_messages(self, messages, maxlen=10, timespan=datetime.timedelta(hours=23)):
+        '''
+        group messages:
+            - based on group, stream
+            - in 23 hour segments (cloudwatch rejects logs spanning > 24 hours)
+            - in groups of 10 to avoid upload limits
+        '''
+        key = None
+        start_date = datetime.datetime.fromtimestamp(0)
+        batch = []
+        for msg in messages:
+            newkey = msg and self.get_group_stream(msg)
+            ts = msg.get('__REALTIME_TIMESTAMP')
+            if not msg or newkey != key or len(batch) >= maxlen or (ts - start_date) > timespan:
+                if batch:
+                    yield key, batch
+                batch = []
+                start_date = ts
+                key = newkey
+            if msg:
+                batch.append(msg)
+        if batch:
+            yield key, batch
+
     def upload_journal_logs(self, log_path):
         import systemd.journal
         cursor = self.load_cursor()
         with systemd.journal.Reader(path=log_path) as reader:
             reader = JournaldClient(reader, cursor)
             reader = filter(self.retain_message, reader)
-            for (group, stream), messages in itertools.groupby(reader, key=self.group_messages):
-                group.log_messages(stream, list(messages))
+            for (group, stream), messages in self.group_messages(reader):
+                group.log_messages(stream, messages)
 
 class JournaldClient:
     def __init__(self, reader, cursor):
         self.reader = reader
         self.cursor = cursor
+        self.wait = False
 
         if self.cursor:
             self.reader.seek_cursor(self.cursor)
@@ -182,11 +206,11 @@ class JournaldClient:
     def __iter__(self):
         return self
     def __next__(self):
-        while True:
-            msg = self.reader.get_next()
-            if msg:
-                return msg
+        if self.wait:
             self.reader.wait()
+        msg = self.reader.get_next()
+        self.wait = not msg
+        return msg
 
 class LogGroupClient:
     ALREADY_EXISTS = 'ResourceAlreadyExistsException'
@@ -217,27 +241,7 @@ class LogGroupClient:
             if e.response['Error']['Code'] != self.ALREADY_EXISTS:
                 raise
 
-    @staticmethod
-    def group_messages(messages, maxlen=10, timespan=datetime.timedelta(hours=23)):
-        '''
-        group messages:
-            - in 23 hour segments (cloudwatch rejects logs spanning > 24 hours)
-            - in groups of 10 to avoid upload limits
-        '''
-        while messages:
-            group = messages
-            start_date = group[0]['__REALTIME_TIMESTAMP']
-            group = itertools.takewhile(lambda m: m['__REALTIME_TIMESTAMP'] - start_date < timespan, group)
-            group = itertools.islice(group, maxlen)
-            group = list(group)
-            yield group
-            messages = messages[len(group):]
-
     def log_messages(self, log_stream, messages):
-        for chunk in self.group_messages(messages):
-            self._log_messages(log_stream, chunk)
-
-    def _log_messages(self, log_stream, messages):
         ''' log the messages '''
         if not messages:
             return

@@ -50,7 +50,7 @@ class JournaldClientTest(TestCase):
                 parent.attach_mock(get_next, 'get_next')
                 parent.attach_mock(wait, 'wait')
 
-                self.assertListEqual(list(self.client()), logs1 + logs2)
+                self.assertListEqual(list(self.client()), logs)
                 parent.assert_has_calls(
                     [call.get_next()] * 4 +
                     [call.wait()] +

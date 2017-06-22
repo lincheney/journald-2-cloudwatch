@@ -109,28 +109,16 @@ class LogGroupClientTest(TestCase):
         self.client.tokens[self.STREAM] = sentinel.token
         self.assertIs( self.client.get_seq_token(self.STREAM), sentinel.token )
 
-    def test_group_messages(self):
-        ''' group_messages() should chunk up messages '''
-
-        key = '__REALTIME_TIMESTAMP'
-        new_msg = {key: datetime.now()}
-        old_msg = {key: datetime.fromtimestamp(123)}
-
-        msgs = [old_msg]*4 + [new_msg]*15
-        chunks = list(LogGroupClient.group_messages(msgs))
-        # old in one chunk, new split into chunk of 10 and 5
-        self.assertEqual(chunks, [msgs[:4], msgs[4:14], msgs[14:]])
-
     def test_log_messages_no_messages(self):
         ''' no messages, it does nothing '''
-        self.client._log_messages(self.STREAM, [])
+        self.client.log_messages(self.STREAM, [])
         # no aws api calls
         self.assertEqual(len(self.cwl.mock_calls), 0)
 
     def mock_log_messages(self, seq_token=[sentinel.token], side_effect=[PUT_LOG_EVENTS_RESULT]):
         with patch.object(self.client, 'get_new_seq_token', side_effect=seq_token, autospec=True) as self.get_new_seq_token:
             with patch.object(self.parent, 'put_log_messages', autospec=True, side_effect=side_effect) as self.put_log_messages:
-                self.client._log_messages(self.STREAM, sentinel.messages)
+                self.client.log_messages(self.STREAM, sentinel.messages)
 
     def test_log_messages(self):
         ''' log_messages() uploads logs to cloudwatch '''
@@ -190,12 +178,3 @@ class LogGroupClientTest(TestCase):
         with self.assertRaises(ClientError) as cm:
             self.mock_log_messages(side_effect=[error])
             self.assertEqual(cm, error)
-
-    def test_real_log_messages(self):
-        chunks = [sentinel.chunk1, sentinel.chunk2, sentinel.chunk3]
-        with patch.object(self.client, 'group_messages', return_value=chunks, autospec=True):
-            with patch.object(self.client, '_log_messages', autospec=True):
-                self.client.log_messages(self.STREAM, sentinel.messages)
-
-                self.client.group_messages.assert_called_once_with(sentinel.messages)
-                self.client._log_messages.assert_has_calls([call(self.STREAM, c) for c in chunks])
