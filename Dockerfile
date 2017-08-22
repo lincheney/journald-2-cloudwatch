@@ -1,7 +1,7 @@
-FROM debian:jessie-slim
+FROM debian:stretch-slim
 
 # Install Python, pip, boto3 and python-systemd.
-RUN BUILD_DEPS="curl python3-dev pkg-config gcc git libsystemd-journal-dev" \
+RUN BUILD_DEPS="curl python3-dev pkg-config gcc git libsystemd-dev" \
     VERSION="233"; \
     apt-get update && \
     apt-get install -y python3 $BUILD_DEPS && \
