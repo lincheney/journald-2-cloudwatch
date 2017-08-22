@@ -6,11 +6,11 @@ services:
 before_install:
   - docker build -t journald-2-cloudwatch -f Dockerfile .
 install:
-  - pip install coverage
   - docker build -t journald-2-cloudwatch-test -f Dockerfile.test .
 
 script:
   - docker run --rm -v `pwd`:`pwd` -w `pwd` journald-2-cloudwatch-test
 
 after_success:
+  - pip install coverage
   - 'bash <(curl -s https://codecov.io/bash)'
