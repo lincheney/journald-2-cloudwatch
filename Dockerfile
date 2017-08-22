@@ -9,7 +9,7 @@ RUN apt-get update && \
 
 # install python-systemd
 ENV BUILD_DEPS="python3-dev pkg-config gcc git libsystemd-journal-dev" \
-    VERSION="233"
+    VERSION="234"
 RUN apt-get update && \
     apt-get install -y $BUILD_DEPS && \
     pip3 install "git+https://github.com/systemd/python-systemd.git/@v$VERSION#egg=systemd" && \
