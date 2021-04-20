@@ -1,4 +1,4 @@
-FROM debian:stretch-slim
+FROM debian:buster-slim
 
 # Install Python, pip, boto3 and python-systemd.
 RUN BUILD_DEPS="curl python3-dev python3-pip python3-setuptools pkg-config \

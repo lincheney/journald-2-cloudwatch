@@ -1,5 +1,6 @@
 FROM journald-2-cloudwatch
 
 RUN apt-get update && apt-get install --no-install-recommends --yes python3-pip python3-setuptools
-RUN pip3 --no-cache-dir install moto coverage coveralls
+RUN pip3 install --upgrade pip
+RUN pip --no-cache-dir install moto coverage coveralls
 ENTRYPOINT ["coverage", "run", "--source=main", "--branch", "-m", "unittest"]
