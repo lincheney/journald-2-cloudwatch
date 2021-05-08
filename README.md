@@ -1,9 +1,8 @@
 # journald-2-cloudwatch
 Send journald logs to AWS CloudWatch
 
-[![Build Status](https://travis-ci.org/lincheney/journald-2-cloudwatch.svg?branch=master)](https://travis-ci.org/lincheney/journald-2-cloudwatch)
+[![Build Status](https://travis-ci.com/lincheney/journald-2-cloudwatch.svg?branch=master)](https://travis-ci.com/lincheney/journald-2-cloudwatch)
 [![codecov](https://codecov.io/gh/lincheney/journald-2-cloudwatch/branch/master/graph/badge.svg)](https://codecov.io/gh/lincheney/journald-2-cloudwatch)
-[![Docker Build Status](https://img.shields.io/docker/build/lincheney/journald-2-cloudwatch.svg)](https://hub.docker.com/r/lincheney/journald-2-cloudwatch/)
 [![](https://images.microbadger.com/badges/image/lincheney/journald-2-cloudwatch.svg)](https://microbadger.com/images/lincheney/journald-2-cloudwatch "Get your own image badge on microbadger.com")
 
 Available on Docker Hub: https://hub.docker.com/r/lincheney/journald-2-cloudwatch/
