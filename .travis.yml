@@ -1,7 +1,8 @@
-language: python
-sudo: required
+language: shell
 services:
   - docker
+os: linux
+dist: focal
 
 env:
   global:
@@ -9,41 +10,42 @@ env:
 
 jobs:
   include:
-    - stage: test
+    - &test
+      stage: test
       arch: amd64
-      dist: focal
       env: TAG=amd64
-    - stage: test
+
+      before_install:
+        - docker build -t "$IMAGE" -f Dockerfile .
+      install:
+        - pip install coverage
+        - docker build -t "$IMAGE"-test -f Dockerfile.test .
+
+      script:
+        - docker run --rm -v "$(pwd):$(pwd)" -w "$(pwd)" "$IMAGE"-test
+
+      after_success:
+        - 'bash <(curl -s https://codecov.io/bash)'
+
+      deploy:
+        provider: script
+        script: >-
+          echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+          && docker tag journald-2-cloudwatch "$DOCKER_USERNAME/$IMAGE:$TAG"
+          && docker push "$DOCKER_USERNAME/$IMAGE:$TAG"
+        on:
+          branch: master
+
+    - <<: *test
       arch: arm64-graviton2
       group: edge
       virt: vm
-      dist: focal
       env: TAG=arm64
 
     - stage: deploy
       script:
-        - echo '{"experimental": "enabled"}' > ~/.docker/config.json
+        - "echo '{\"experimental\": \"enabled\"}' > ~/.docker/config.json"
         - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
         - docker manifest create "$DOCKER_USERNAME/$IMAGE" --amend "$DOCKER_USERNAME/$IMAGE:amd64" --amend "$DOCKER_USERNAME/$IMAGE:arm64"
         - docker manifest push "$DOCKER_USERNAME/$IMAGE"
 
-before_install:
-  - docker build -t "$IMAGE" -f Dockerfile .
-install:
-  - pip install coverage
-  - docker build -t "$IMAGE"-test -f Dockerfile.test .
-
-script:
-  - docker run --rm -v "$(pwd):$(pwd)" -w "$(pwd)" "$IMAGE"-test
-
-after_success:
-  - 'bash <(curl -s https://codecov.io/bash)'
-
-deploy:
-  provider: script
-  script: >-
-    echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-    && docker tag journald-2-cloudwatch "$DOCKER_USERNAME/$IMAGE:$TAG"
-    && docker push "$DOCKER_USERNAME/$IMAGE:$TAG"
-  on:
-    branch: master
