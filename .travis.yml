@@ -9,12 +9,22 @@ env:
 
 jobs:
   include:
-    - arch: amd64
+    - stage: test
+      arch: amd64
       dist: focal
-    - arch: arm64-graviton2
+      env: TAG=amd64
+    - stage: test
+      arch: arm64-graviton2
       group: edge
       virt: vm
       dist: focal
+      env: TAG=arm64
+
+    - stage: deploy
+      script:
+        - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+        - docker manifest create "$DOCKER_USERNAME/$IMAGE" --amend "$DOCKER_USERNAME/$IMAGE:amd64" --amend "$DOCKER_USERNAME/$IMAGE:arm64"
+        - docker manifest push "$DOCKER_USERNAME/$IMAGE"
 
 before_install:
   - docker build -t "$IMAGE" -f Dockerfile .
@@ -32,7 +42,7 @@ deploy:
   provider: script
   script: >-
     echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-    && docker tag journald-2-cloudwatch "$DOCKER_USERNAME/$IMAGE"
-    && docker push "$DOCKER_USERNAME/$IMAGE"
+    && docker tag journald-2-cloudwatch "$DOCKER_USERNAME/$IMAGE:$TAG"
+    && docker push "$DOCKER_USERNAME/$IMAGE:$TAG"
   on:
     branch: master
