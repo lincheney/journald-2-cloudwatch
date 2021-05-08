@@ -3,6 +3,10 @@ sudo: required
 services:
   - docker
 
+env:
+  global:
+    - IMAGE=journald-2-cloudwatch
+
 jobs:
   include:
     - arch: amd64
@@ -13,13 +17,22 @@ jobs:
       dist: focal
 
 before_install:
-  - docker build -t journald-2-cloudwatch -f Dockerfile .
+  - docker build -t "$IMAGE" -f Dockerfile .
 install:
   - pip install coverage
-  - docker build -t journald-2-cloudwatch-test -f Dockerfile.test .
+  - docker build -t "$IMAGE"-test -f Dockerfile.test .
 
 script:
-  - docker run --rm -v `pwd`:`pwd` -w `pwd` journald-2-cloudwatch-test
+  - docker run --rm -v "$(pwd):$(pwd)" -w "$(pwd)" "$IMAGE"-test
 
 after_success:
   - 'bash <(curl -s https://codecov.io/bash)'
+
+deploy:
+  provider: script
+  script: |
+    echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+    docker tag journald-2-cloudwatch "$DOCKER_USERNAME/$IMAGE"
+    docker push "$DOCKER_USERNAME/$IMAGE"
+  on:
+    branch: master
