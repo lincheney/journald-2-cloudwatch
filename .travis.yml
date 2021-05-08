@@ -32,7 +32,7 @@ deploy:
   provider: script
   script: |
     echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-    docker tag journald-2-cloudwatch "$DOCKER_USERNAME/$IMAGE"
-    docker push "$DOCKER_USERNAME/$IMAGE"
+     && docker tag journald-2-cloudwatch "$DOCKER_USERNAME/$IMAGE"
+     && docker push "$DOCKER_USERNAME/$IMAGE"
   on:
     branch: master
