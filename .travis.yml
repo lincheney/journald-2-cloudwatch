@@ -22,6 +22,7 @@ jobs:
 
     - stage: deploy
       script:
+        - echo '{"experimental": "enabled"}' > ~/.docker/config.json
         - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
         - docker manifest create "$DOCKER_USERNAME/$IMAGE" --amend "$DOCKER_USERNAME/$IMAGE:amd64" --amend "$DOCKER_USERNAME/$IMAGE:arm64"
         - docker manifest push "$DOCKER_USERNAME/$IMAGE"
