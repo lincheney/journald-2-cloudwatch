@@ -3,6 +3,15 @@ sudo: required
 services:
   - docker
 
+jobs:
+  include:
+    - arch: amd64
+      dist: focal
+    - arch: arm64-graviton2
+      group: edge
+      virt: vm
+      dist: focal
+
 before_install:
   - docker build -t journald-2-cloudwatch -f Dockerfile .
 install:
